@@ -779,10 +779,10 @@ class MainActivity : Activity() {
         c.addView(btnSecondary("← رجوع") { screen = "vaults"; render() })
         c.addView(label("خزنة: ${v.name}", ACCENT, 16f))
         if (v.items.isEmpty()) c.addView(label("فارغة.", MUTED))
-        for ((idx, it) in v.items.withIndex()) {
+        for ((idx, item) in v.items.withIndex()) {
             val tv = TextView(this).apply {
-                val tag = if (it.type == "text") "📝" else "📎"
-                text = "$tag ${it.name}\n${it.content.take(120)}"
+                val tag = if (item.type == "text") "📝" else "📎"
+                text = "$tag ${item.name}\n${item.content.take(120)}"
                 setTextColor(FG); setBackgroundColor(CARD)
                 setPadding(dp(12), dp(8), dp(12), dp(8))
                 layoutParams = LinearLayout.LayoutParams(
@@ -790,7 +790,7 @@ class MainActivity : Activity() {
                 ).also { it.topMargin = dp(4) }
                 setOnLongClickListener {
                     AlertDialog.Builder(this@MainActivity)
-                        .setMessage("حذف ${it.name}؟")
+                        .setMessage("حذف ${item.name}؟")
                         .setPositiveButton("حذف") { _, _ ->
                             v.items.removeAt(idx); Store.save(); render()
                         }
@@ -979,4 +979,4 @@ class MainActivity : Activity() {
     private fun toast(msg: String) {
         Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
     }
-}  
+}
