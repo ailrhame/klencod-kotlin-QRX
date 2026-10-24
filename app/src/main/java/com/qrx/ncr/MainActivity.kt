@@ -37,6 +37,10 @@ object QrEncoder {
     private val FORMAT_M = intArrayOf(
         0x5412, 0x5125, 0x5E7C, 0x5B4B, 0x45F9, 0x40CE, 0x4F97, 0x4AA0
     )
+    private val VERSION_INFO = intArrayOf(
+        0, 0, 0, 0, 0, 0,
+        0x07C94, 0x085BC, 0x09A99
+    )
 
     private val GF_EXP = IntArray(512)
     private val GF_LOG = IntArray(256)
@@ -70,7 +74,7 @@ object QrEncoder {
             val need = 4 + 8 + byteLen * 8
             if (need <= cap) return v
         }
-        throw IllegalArgumentException("payload too long (max ${dataCodewords(9)} bytes)")
+        throw IllegalArgumentException("payload too long")
     }
 
     private fun gfMul(a: Int, b: Int): Int {
@@ -110,7 +114,7 @@ object QrEncoder {
 
     private fun encodeData(bytes: ByteArray, ver: Int): List<Boolean> {
         val bits = mutableListOf<Boolean>()
-        appendBits(bits, 4, 4) // byte mode
+        appendBits(bits, 4, 4)
         appendBits(bits, bytes.size, 8)
         for (b in bytes) appendBits(bits, b.toInt() and 0xFF, 8)
         val cap = dataCodewords(ver) * 8
@@ -198,6 +202,23 @@ object QrEncoder {
         }
     }
 
+    private fun placeVersionInfo(m: Array<BooleanArray>, res: Array<BooleanArray>, ver: Int) {
+        if (ver < 7) return
+        val v = VERSION_INFO[ver - 1]
+        val size = m.size
+        for (i in 0 until 18) {
+            val bit = ((v shr i) and 1) == 1
+            val trRow = i / 3
+            val trCol = size - 11 + (i % 3)
+            m[trRow][trCol] = bit
+            res[trRow][trCol] = true
+            val blRow = size - 11 + (i % 3)
+            val blCol = i / 3
+            m[blRow][blCol] = bit
+            res[blRow][blCol] = true
+        }
+    }
+
     private fun placeMatrix(cw: IntArray, ver: Int): Pair<Array<BooleanArray>, Array<BooleanArray>> {
         val size = 17 + 4 * ver
         val m = Array(size) { BooleanArray(size) }
@@ -228,6 +249,8 @@ object QrEncoder {
             res[8][size - 1 - i] = true
             res[size - 1 - i][8] = true
         }
+
+        placeVersionInfo(m, res, ver)
 
         var bit = 0
         var col = size - 1
@@ -303,8 +326,8 @@ object QrEncoder {
         return m
     }
 
-    fun renderBitmap(text: String, sizePx: Int, label: String?): Bitmap {
-        val m = encode(text)
+    fun renderBitmap(text: String, sizePx: Int, label: String?): Bitmap? {
+        val m = try { encode(text) } catch (e: Exception) { return null }
         val modules = m.size
         val quiet = 4
         val total = modules + quiet * 2
@@ -324,26 +347,31 @@ object QrEncoder {
                 )
             }
         }
-        if (!label.isNullOrEmpty()) {
-            val overlayModules = minOf(15, modules / 3).coerceAtLeast(5)
+        if (!label.isNullOrEmpty() && modules >= 29) {
+            // v3+ only. v5+ gets 7x7, v3-v4 gets 5x5. ECC M handles both safely.
+            val overlayModules = if (modules >= 37) 7 else 5
             val overlayPx = overlayModules * scale
             val cx = bmpSize / 2
             val cy = bmpSize / 2
-            val half = overlayPx / 2
+            val half = (overlayPx + 1) / 2
             val whiteBg = Paint().apply { color = Color.WHITE }
             canvas.drawRect(
                 (cx - half).toFloat(), (cy - half).toFloat(),
                 (cx + half).toFloat(), (cy + half).toFloat(), whiteBg
             )
+            val textSizePx = overlayPx * 0.32f
             val tp = Paint().apply {
                 color = Color.BLACK
                 isAntiAlias = true
                 textAlign = Paint.Align.CENTER
                 typeface = Typeface.DEFAULT_BOLD
-                textSize = (overlayPx.toFloat() / maxOf(label.length, 1)).coerceAtMost(overlayPx / 2f)
+                textSize = textSizePx
             }
-            val display = if (label.length > 12) label.substring(0, 11) + "…" else label
-            canvas.drawText(display, cx.toFloat(), (cy + tp.textSize / 3).toFloat(), tp)
+            val maxChars = if (overlayModules >= 7) 8 else 5
+            val display = if (label.length > maxChars) label.take(maxChars - 1) + "…" else label
+            val fm = tp.fontMetrics
+            val baselineY = cy - (fm.ascent + fm.descent) / 2f
+            canvas.drawText(display, cx.toFloat(), baselineY, tp)
         }
         return bmp
     }
@@ -370,7 +398,7 @@ data class Vault(
 )
 
 // ============================================================
-// STORE — SharedPreferences + JSON persistence
+// STORE
 // ============================================================
 object Store {
     private const val PREFS = "qrx_store_v1"
@@ -440,12 +468,11 @@ object Store {
 
     fun findChan(id: String): Chan? = chans.firstOrNull { it.id == id }
     fun findVault(id: String): Vault? = vaults.firstOrNull { it.id == id }
-
     fun newId(): String = UUID.randomUUID().toString().replace("-", "").substring(0, 8)
 }
 
 // ============================================================
-// MAIN ACTIVITY — programmatic UI + intent handling
+// MAIN ACTIVITY
 // ============================================================
 class MainActivity : Activity() {
 
@@ -639,7 +666,6 @@ class MainActivity : Activity() {
         c.addView(btn("فتح قسم الخزنة") { screen = "vaults"; render() })
     }
 
-    // ---------- Section 1: Messages ----------
     private fun buildMessages(c: LinearLayout) {
         c.addView(btnSecondary("← رجوع") { screen = "home"; render() })
         c.addView(label("الفرع الأول — إنشاء باركود", ACCENT, 16f))
@@ -693,6 +719,10 @@ class MainActivity : Activity() {
         c.addView(label("شارك هذا الباركود مع من تريد مراسلته:${ch.name}", ACCENT))
         val payload = "msgv1://chan/${ch.id}?n=${Uri.encode(ch.name)}"
         val bmp = QrEncoder.renderBitmap(payload, 900, ch.name)
+        if (bmp == null) {
+            c.addView(label("البيانات طويلة جداً — قصّر اسم القناة", DANGER))
+            return
+        }
         val iv = ImageView(this).apply {
             setImageBitmap(bmp)
             adjustViewBounds = true
@@ -749,12 +779,9 @@ class MainActivity : Activity() {
         })
     }
 
-    // ---------- Section 2: Vault ----------
     private fun buildVaults(c: LinearLayout) {
         c.addView(btnSecondary("← رجوع") { screen = "home"; render() })
-        c.addView(btn("إنشاء خزنة جديدة") {
-            createVaultDialog()
-        })
+        c.addView(btn("إنشاء خزنة جديدة") { createVaultDialog() })
         c.addView(btnSecondary("لصق باركود خزنة وارد") { showPasteDialog("vaultv1") })
         if (Store.vaults.isEmpty()) {
             c.addView(label("لا توجد خزائن بعد.", MUTED))
@@ -804,7 +831,8 @@ class MainActivity : Activity() {
             c.addView(btn("إضافة نص") { addTextToVault(v) })
             c.addView(btnSecondary("إضافة ملف (مرجع URI فقط)") { addFileToVault(v) })
             c.addView(btn("توليد باركود الخزنة") {
-                val payload = packVault(v) ?: return@btn
+                val payload = packVault(v)
+                if (payload == null) { toast("الخزنة كبيرة جداً"); return@btn }
                 currentVaultId = v.id
                 screen = "vault_qr"
                 render()
@@ -816,9 +844,17 @@ class MainActivity : Activity() {
     private fun buildVaultQr(c: LinearLayout) {
         val v = Store.findVault(currentVaultId ?: return) ?: return
         c.addView(btnSecondary("← رجوع") { screen = "vault_view"; render() })
-        val payload = packVault(v) ?: return
+        val payload = packVault(v)
+        if (payload == null) {
+            c.addView(label("الخزنة كبيرة جداً للباركود", DANGER))
+            return
+        }
         c.addView(label("باركود خزنة: ${v.name}", ACCENT))
         val bmp = QrEncoder.renderBitmap(payload, 900, v.name)
+        if (bmp == null) {
+            c.addView(label("البيانات طويلة جداً — قلل محتوى الخزنة", DANGER))
+            return
+        }
         val iv = ImageView(this).apply {
             setImageBitmap(bmp); adjustViewBounds = true
             layoutParams = LinearLayout.LayoutParams(
@@ -829,7 +865,6 @@ class MainActivity : Activity() {
         c.addView(btnSecondary("نسخ نص الباركود") { copy(payload) })
     }
 
-    // ---------- helpers ----------
     private fun createVaultDialog() {
         val et = EditText(this).apply {
             hint = "اسم الخزنة"; setTextColor(FG); setHintTextColor(MUTED)
@@ -892,7 +927,6 @@ class MainActivity : Activity() {
         }
         AlertDialog.Builder(this)
             .setTitle("مرجع ملف")
-            .setMessage("ملاحظة: URI صالح على نفس الجهاز فقط. لعناصر تنقل بين الأجهزة استخدم النص.")
             .setView(layout)
             .setPositiveButton("إضافة") { _, _ ->
                 val n = nameEt.text.toString().trim().ifEmpty { "ملف" }
@@ -906,14 +940,14 @@ class MainActivity : Activity() {
 
     private fun packVault(v: Vault): String? {
         val arr = JSONArray()
-        for (it in v.items) {
-            arr.put(JSONObject().put("t", it.type).put("n", it.name).put("c", it.content))
+        for (item in v.items) {
+            arr.put(JSONObject().put("t", item.type).put("n", item.name).put("c", item.content))
         }
         val json = arr.toString()
         val b64 = Base64.encodeToString(json.toByteArray(Charsets.UTF_8), Base64.URL_SAFE or Base64.NO_WRAP)
         val uri = "vaultv1://pack/${v.id}?n=${Uri.encode(v.name)}&d=$b64"
-        if (uri.toByteArray(Charsets.UTF_8).size > 1700) {
-            toast("الخزنة كبيرة جداً للباركود (قلل العناصر أو اختصر النصوص)")
+        if (uri.toByteArray(Charsets.UTF_8).size > 170) {
+            toast("الخزنة كبيرة جداً للباركود (الحد ~170 بايت، قلل العناصر)")
             return null
         }
         return uri
@@ -921,6 +955,7 @@ class MainActivity : Activity() {
 
     private fun showQrDialog(payload: String, labelText: String, hint: String) {
         val bmp = QrEncoder.renderBitmap(payload, 900, labelText)
+        if (bmp == null) { toast("البيانات طويلة جداً للباركود"); return }
         val iv = ImageView(this).apply {
             setImageBitmap(bmp); adjustViewBounds = true
         }
