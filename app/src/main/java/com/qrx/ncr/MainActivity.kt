@@ -5,6 +5,7 @@ import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -300,18 +301,21 @@ object QrEncoder {
     private fun placeFormat(m: Array<BooleanArray>, mask: Int) {
         val f = FORMAT_M[mask]
         val s = m.size
-        m[8][0] = bitOf(f, 0); m[8][1] = bitOf(f, 1); m[8][2] = bitOf(f, 2)
-        m[8][3] = bitOf(f, 3); m[8][4] = bitOf(f, 4); m[8][5] = bitOf(f, 5)
-        m[8][7] = bitOf(f, 6); m[8][8] = bitOf(f, 7); m[7][8] = bitOf(f, 8)
-        m[5][8] = bitOf(f, 9); m[4][8] = bitOf(f, 10); m[3][8] = bitOf(f, 11)
-        m[2][8] = bitOf(f, 12); m[1][8] = bitOf(f, 13); m[0][8] = bitOf(f, 14)
 
-        m[s - 1][8] = bitOf(f, 0); m[s - 2][8] = bitOf(f, 1); m[s - 3][8] = bitOf(f, 2)
-        m[s - 4][8] = bitOf(f, 3); m[s - 5][8] = bitOf(f, 4); m[s - 6][8] = bitOf(f, 5)
-        m[s - 7][8] = bitOf(f, 6)
-        m[8][s - 8] = bitOf(f, 7); m[8][s - 7] = bitOf(f, 8); m[8][s - 6] = bitOf(f, 9)
-        m[8][s - 5] = bitOf(f, 10); m[8][s - 4] = bitOf(f, 11); m[8][s - 3] = bitOf(f, 12)
-        m[8][s - 2] = bitOf(f, 13); m[8][s - 1] = bitOf(f, 14)
+        // MSB (bit 14) -> (8,0), LSB (bit 0) -> (0,8) per spec
+        m[8][0] = bitOf(f, 14); m[8][1] = bitOf(f, 13); m[8][2] = bitOf(f, 12)
+        m[8][3] = bitOf(f, 11); m[8][4] = bitOf(f, 10); m[8][5] = bitOf(f, 9)
+        m[8][7] = bitOf(f, 8); m[8][8] = bitOf(f, 7); m[7][8] = bitOf(f, 6)
+        m[5][8] = bitOf(f, 5); m[4][8] = bitOf(f, 4); m[3][8] = bitOf(f, 3)
+        m[2][8] = bitOf(f, 2); m[1][8] = bitOf(f, 1); m[0][8] = bitOf(f, 0)
+
+        // Second copy: MSB -> (s-1,8), LSB -> (8,s-1)
+        m[s - 1][8] = bitOf(f, 14); m[s - 2][8] = bitOf(f, 13); m[s - 3][8] = bitOf(f, 12)
+        m[s - 4][8] = bitOf(f, 11); m[s - 5][8] = bitOf(f, 10); m[s - 6][8] = bitOf(f, 9)
+        m[s - 7][8] = bitOf(f, 8)
+        m[8][s - 8] = bitOf(f, 7); m[8][s - 7] = bitOf(f, 6); m[8][s - 6] = bitOf(f, 5)
+        m[8][s - 5] = bitOf(f, 4); m[8][s - 4] = bitOf(f, 3); m[8][s - 3] = bitOf(f, 2)
+        m[8][s - 2] = bitOf(f, 1); m[8][s - 1] = bitOf(f, 0)
     }
 
     fun encode(text: String): Array<BooleanArray> {
@@ -326,7 +330,7 @@ object QrEncoder {
         return m
     }
 
-    fun renderBitmap(text: String, sizePx: Int, label: String?): Bitmap? {
+    fun renderBitmap(text: String, sizePx: Int): Bitmap? {
         val m = try { encode(text) } catch (e: Exception) { return null }
         val modules = m.size
         val quiet = 4
@@ -346,32 +350,6 @@ object QrEncoder {
                     (x + scale).toFloat(), (y + scale).toFloat(), black
                 )
             }
-        }
-        if (!label.isNullOrEmpty() && modules >= 29) {
-            // v3+ only. v5+ gets 7x7, v3-v4 gets 5x5. ECC M handles both safely.
-            val overlayModules = if (modules >= 37) 7 else 5
-            val overlayPx = overlayModules * scale
-            val cx = bmpSize / 2
-            val cy = bmpSize / 2
-            val half = (overlayPx + 1) / 2
-            val whiteBg = Paint().apply { color = Color.WHITE }
-            canvas.drawRect(
-                (cx - half).toFloat(), (cy - half).toFloat(),
-                (cx + half).toFloat(), (cy + half).toFloat(), whiteBg
-            )
-            val textSizePx = overlayPx * 0.32f
-            val tp = Paint().apply {
-                color = Color.BLACK
-                isAntiAlias = true
-                textAlign = Paint.Align.CENTER
-                typeface = Typeface.DEFAULT_BOLD
-                textSize = textSizePx
-            }
-            val maxChars = if (overlayModules >= 7) 8 else 5
-            val display = if (label.length > maxChars) label.take(maxChars - 1) + "…" else label
-            val fm = tp.fontMetrics
-            val baselineY = cy - (fm.ascent + fm.descent) / 2f
-            canvas.drawText(display, cx.toFloat(), baselineY, tp)
         }
         return bmp
     }
@@ -481,6 +459,10 @@ class MainActivity : Activity() {
     private var currentVaultId: String? = null
     private var pendingReplyChanId: String? = null
     private var pendingReplyChanName: String? = null
+    private var pendingVaultIdForPick: String? = null
+
+    private val REQ_PICK_IMAGE = 1001
+    private val REQ_PICK_FILE = 1002
 
     private val BG = 0xFF0E1620.toInt()
     private val FG = 0xFFE8EEF5.toInt()
@@ -502,6 +484,30 @@ class MainActivity : Activity() {
             handleIntent(intent)
             render()
         }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (resultCode != RESULT_OK) return
+        val uri = data?.data ?: return
+        val vaultId = pendingVaultIdForPick ?: return
+        pendingVaultIdForPick = null
+        val v = Store.findVault(vaultId) ?: return
+        try {
+            contentResolver.takePersistableUriPermission(
+                uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+        } catch (e: Exception) { }
+        val name = uri.lastPathSegment?.substringAfterLast('/')?.take(48) ?: "عنصر"
+        val type = when (requestCode) {
+            REQ_PICK_IMAGE -> "image"
+            else -> "file"
+        }
+        v.items.add(VaultItem(type, name, uri.toString()))
+        Store.save()
+        currentVaultId = vaultId
+        screen = "vault_view"
+        render()
     }
 
     private fun handleIntent(intent: Intent) {
@@ -698,7 +704,7 @@ class MainActivity : Activity() {
 
     private fun buildCreateChan(c: LinearLayout) {
         c.addView(btnSecondary("← رجوع") { screen = "messages"; render() })
-        c.addView(label("اسم القناة (سيظهر وسط الباركود):"))
+        c.addView(label("اسم القناة:"))
         val nameInput = input("مثال: أحمد")
         c.addView(nameInput)
         c.addView(btn("توليد الباركود") {
@@ -716,9 +722,9 @@ class MainActivity : Activity() {
     private fun buildChanQr(c: LinearLayout) {
         val ch = Store.findChan(currentChanId ?: return) ?: return
         c.addView(btnSecondary("← رجوع") { screen = "chan_inbox"; render() })
-        c.addView(label("شارك هذا الباركود مع من تريد مراسلته:${ch.name}", ACCENT))
+        c.addView(label("شارك هذا الباركود: ${ch.name}", ACCENT))
         val payload = "msgv1://chan/${ch.id}?n=${Uri.encode(ch.name)}"
-        val bmp = QrEncoder.renderBitmap(payload, 900, ch.name)
+        val bmp = QrEncoder.renderBitmap(payload, 900)
         if (bmp == null) {
             c.addView(label("البيانات طويلة جداً — قصّر اسم القناة", DANGER))
             return
@@ -775,7 +781,7 @@ class MainActivity : Activity() {
             if (m.isEmpty()) { toast("اكتب رسالة"); return@btn }
             val b64 = Base64.encodeToString(m.toByteArray(Charsets.UTF_8), Base64.URL_SAFE or Base64.NO_WRAP)
             val uri = "msgv1://msg/$id?n=${Uri.encode(name)}&f=${Uri.encode(f)}&m=$b64"
-            showQrDialog(uri, name, "أظهر هذا الباركود للمرسل")
+            showQrDialog(uri, "أظهر هذا الباركود للمرسل")
         })
     }
 
@@ -807,36 +813,94 @@ class MainActivity : Activity() {
         c.addView(label("خزنة: ${v.name}", ACCENT, 16f))
         if (v.items.isEmpty()) c.addView(label("فارغة.", MUTED))
         for ((idx, item) in v.items.withIndex()) {
-            val tv = TextView(this).apply {
-                val tag = if (item.type == "text") "📝" else "📎"
-                text = "$tag ${item.name}\n${item.content.take(120)}"
-                setTextColor(FG); setBackgroundColor(CARD)
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setBackgroundColor(CARD)
                 setPadding(dp(12), dp(8), dp(12), dp(8))
                 layoutParams = LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
                 ).also { it.topMargin = dp(4) }
-                setOnLongClickListener {
-                    AlertDialog.Builder(this@MainActivity)
-                        .setMessage("حذف ${item.name}؟")
-                        .setPositiveButton("حذف") { _, _ ->
-                            v.items.removeAt(idx); Store.save(); render()
-                        }
-                        .setNegativeButton("إلغاء", null).show()
-                    true
+            }
+            val header = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            when (item.type) {
+                "image" -> {
+                    val thumb = ImageView(this).apply {
+                        setImageBitmap(loadThumbnail(Uri.parse(item.content), 96))
+                        layoutParams = LinearLayout.LayoutParams(dp(64), dp(64))
+                    }
+                    header.addView(thumb)
+                    val tv = TextView(this).apply {
+                        text = "🖼 ${item.name}"
+                        setTextColor(FG); setPadding(dp(8), 0, 0, 0)
+                    }
+                    header.addView(tv)
+                }
+                "app" -> {
+                    val icon = ImageView(this).apply {
+                        val pm = packageManager
+                        try {
+                            val info = pm.getApplicationInfo(item.content, 0)
+                            setImageDrawable(pm.getApplicationIcon(info))
+                        } catch (e: Exception) { }
+                        layoutParams = LinearLayout.LayoutParams(dp(48), dp(48))
+                    }
+                    header.addView(icon)
+                    val tv = TextView(this).apply {
+                        text = "📱 ${item.name}"
+                        setTextColor(FG); setPadding(dp(8), 0, 0, 0)
+                    }
+                    header.addView(tv)
+                }
+                "file" -> {
+                    val tv = TextView(this).apply {
+                        text = "📎 ${item.name}"
+                        setTextColor(FG)
+                    }
+                    header.addView(tv)
+                }
+                else -> {
+                    val tv = TextView(this).apply {
+                        text = "📝 ${item.name}"
+                        setTextColor(FG)
+                    }
+                    header.addView(tv)
                 }
             }
-            c.addView(tv)
+            row.addView(header)
+            if (item.type == "text") {
+                val body = TextView(this).apply {
+                    text = item.content.take(300)
+                    setTextColor(MUTED)
+                    setPadding(0, dp(4), 0, 0)
+                }
+                row.addView(body)
+            }
+            row.setOnClickListener { openItem(item) }
+            row.setOnLongClickListener {
+                AlertDialog.Builder(this@MainActivity)
+                    .setMessage("حذف ${item.name}؟")
+                    .setPositiveButton("حذف") { _, _ ->
+                        v.items.removeAt(idx); Store.save(); render()
+                    }
+                    .setNegativeButton("إلغاء", null).show()
+                true
+            }
+            c.addView(row)
         }
         if (!v.received) {
+            c.addView(label("إضافة عناصر:", MUTED, 12f))
+            c.addView(btn("➕ إضافة صورة من الجهاز") { pickFromDevice(REQ_PICK_IMAGE, "image/*", v.id) })
+            c.addView(btnSecondary("➕ إضافة ملف من الجهاز") { pickFromDevice(REQ_PICK_FILE, "*/*", v.id) })
+            c.addView(btnSecondary("➕ إضافة تطبيق مثبت") { showAppPicker(v) })
             c.addView(btn("إضافة نص") { addTextToVault(v) })
-            c.addView(btnSecondary("إضافة ملف (مرجع URI فقط)") { addFileToVault(v) })
+            c.addView(label("ملاحظة: الصور والملفات تُشارك كمرجع محلي (URI) صالح على نفس الجهاز فقط.", MUTED, 11f))
             c.addView(btn("توليد باركود الخزنة") {
                 val payload = packVault(v)
-                if (payload == null) { toast("الخزنة كبيرة جداً"); return@btn }
+                if (payload == null) { toast("الخزنة كبيرة جداً للباركود"); return@btn }
                 currentVaultId = v.id
                 screen = "vault_qr"
                 render()
-                showQrDialog(payload, v.name, "شارك هذا الباركود — سيستلمه الشخص كخزنة")
+                showQrDialog(payload, "شارك هذا الباركود — سيستلمه الشخص كخزنة")
             })
         }
     }
@@ -846,13 +910,13 @@ class MainActivity : Activity() {
         c.addView(btnSecondary("← رجوع") { screen = "vault_view"; render() })
         val payload = packVault(v)
         if (payload == null) {
-            c.addView(label("الخزنة كبيرة جداً للباركود", DANGER))
+            c.addView(label("الخزنة كبيرة جداً للباركود — قلل العناصر", DANGER))
             return
         }
         c.addView(label("باركود خزنة: ${v.name}", ACCENT))
-        val bmp = QrEncoder.renderBitmap(payload, 900, v.name)
+        val bmp = QrEncoder.renderBitmap(payload, 900)
         if (bmp == null) {
-            c.addView(label("البيانات طويلة جداً — قلل محتوى الخزنة", DANGER))
+            c.addView(label("البيانات طويلة جداً", DANGER))
             return
         }
         val iv = ImageView(this).apply {
@@ -863,6 +927,79 @@ class MainActivity : Activity() {
         }
         c.addView(iv)
         c.addView(btnSecondary("نسخ نص الباركود") { copy(payload) })
+    }
+
+    private fun pickFromDevice(req: Int, mime: String, vaultId: String) {
+        pendingVaultIdForPick = vaultId
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = mime
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        }
+        try { startActivityForResult(intent, req) }
+        catch (e: Exception) { toast("لا يوجد تطبيق لاختيار الملفات") }
+    }
+
+    private fun showAppPicker(v: Vault) {
+        val pm = packageManager
+        val apps = pm.getInstalledApplications(0)
+            .filter { pm.getLaunchIntentForPackage(it.packageName) != null }
+            .sortedBy { pm.getApplicationLabel(it).toString() }
+        if (apps.isEmpty()) { toast("لا توجد تطبيقات"); return }
+        val names = apps.map { pm.getApplicationLabel(it).toString() }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("اختر تطبيقاً")
+            .setItems(names) { _, idx ->
+                val info = apps[idx]
+                val label = pm.getApplicationLabel(info).toString()
+                v.items.add(VaultItem("app", label, info.packageName))
+                Store.save()
+                currentVaultId = v.id
+                screen = "vault_view"
+                render()
+            }
+            .setNegativeButton("إلغاء", null).show()
+    }
+
+    private fun openItem(item: VaultItem) {
+        when (item.type) {
+            "image", "file" -> {
+                try {
+                    val uri = Uri.parse(item.content)
+                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                        setDataAndType(uri, contentResolver.getType(uri) ?: "*/*")
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    startActivity(intent)
+                } catch (e: Exception) {
+                    toast("لا يمكن فتح العنصر (قد يكون من جهاز آخر)")
+                }
+            }
+            "app" -> {
+                val intent = packageManager.getLaunchIntentForPackage(item.content)
+                if (intent != null) try { startActivity(intent) }
+                catch (e: Exception) { toast("غير متاح على هذا الجهاز") }
+                else toast("التطبيق غير مثبت")
+            }
+            "text" -> {
+                AlertDialog.Builder(this)
+                    .setTitle(item.name)
+                    .setMessage(item.content)
+                    .setPositiveButton("إغلاق", null).show()
+            }
+        }
+    }
+
+    private fun loadThumbnail(uri: Uri, maxPx: Int): Bitmap? {
+        return try {
+            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
+            val longest = maxOf(opts.outWidth, opts.outHeight).coerceAtLeast(1)
+            var sample = 1
+            while (longest / sample > maxPx) sample *= 2
+            val opts2 = BitmapFactory.Options().apply { inSampleSize = sample }
+            contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts2) }
+        } catch (e: Exception) { null }
     }
 
     private fun createVaultDialog() {
@@ -910,34 +1047,6 @@ class MainActivity : Activity() {
             .setNegativeButton("إلغاء", null).show()
     }
 
-    private fun addFileToVault(v: Vault) {
-        val nameEt = EditText(this).apply {
-            hint = "اسم العنصر"; setTextColor(FG); setHintTextColor(MUTED)
-            setBackgroundColor(CARD); setPadding(dp(10), dp(8), dp(10), dp(8))
-        }
-        val uriEt = EditText(this).apply {
-            hint = "URI الملف (content://... أو file://...)"; setTextColor(FG)
-            setHintTextColor(MUTED); setBackgroundColor(CARD)
-            setPadding(dp(10), dp(8), dp(10), dp(8))
-        }
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(10), dp(20), dp(10))
-            addView(nameEt); addView(uriEt)
-        }
-        AlertDialog.Builder(this)
-            .setTitle("مرجع ملف")
-            .setView(layout)
-            .setPositiveButton("إضافة") { _, _ ->
-                val n = nameEt.text.toString().trim().ifEmpty { "ملف" }
-                val u = uriEt.text.toString().trim()
-                if (u.isEmpty()) { toast("URI مطلوب"); return@setPositiveButton }
-                v.items.add(VaultItem("file", n, u))
-                Store.save(); render()
-            }
-            .setNegativeButton("إلغاء", null).show()
-    }
-
     private fun packVault(v: Vault): String? {
         val arr = JSONArray()
         for (item in v.items) {
@@ -947,14 +1056,13 @@ class MainActivity : Activity() {
         val b64 = Base64.encodeToString(json.toByteArray(Charsets.UTF_8), Base64.URL_SAFE or Base64.NO_WRAP)
         val uri = "vaultv1://pack/${v.id}?n=${Uri.encode(v.name)}&d=$b64"
         if (uri.toByteArray(Charsets.UTF_8).size > 170) {
-            toast("الخزنة كبيرة جداً للباركود (الحد ~170 بايت، قلل العناصر)")
             return null
         }
         return uri
     }
 
-    private fun showQrDialog(payload: String, labelText: String, hint: String) {
-        val bmp = QrEncoder.renderBitmap(payload, 900, labelText)
+    private fun showQrDialog(payload: String, hint: String) {
+        val bmp = QrEncoder.renderBitmap(payload, 900)
         if (bmp == null) { toast("البيانات طويلة جداً للباركود"); return }
         val iv = ImageView(this).apply {
             setImageBitmap(bmp); adjustViewBounds = true
