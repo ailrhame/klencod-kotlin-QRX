@@ -1,0 +1,5 @@
+{
+  "buildSystem": "native",
+  "language": "kotlin",
+  "projectName": "qrx"
+}
