@@ -2,8 +2,14 @@ package com.qrx.ncr
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -11,7 +17,9 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.IBinder
 import android.text.InputType
 import android.text.method.ScrollingMovementMethod
 import android.util.Base64
@@ -27,6 +35,14 @@ import android.widget.TextView
 import android.widget.Toast
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
+import java.io.OutputStream
+import java.net.Inet4Address
+import java.net.NetworkInterface
+import java.net.ServerSocket
+import java.net.Socket
+import java.net.URLDecoder
+import java.util.Collections
 import java.util.UUID
 
 // ============================================================
@@ -38,18 +54,14 @@ object QrEncoder {
     private val FORMAT_M = intArrayOf(
         0x5412, 0x5125, 0x5E7C, 0x5B4B, 0x45F9, 0x40CE, 0x4F97, 0x4AA0
     )
-    private val VERSION_INFO = intArrayOf(
-        0, 0, 0, 0, 0, 0,
-        0x07C94, 0x085BC, 0x09A99
-    )
+    private val VERSION_INFO = intArrayOf(0, 0, 0, 0, 0, 0, 0x07C94, 0x085BC, 0x09A99)
 
     private val GF_EXP = IntArray(512)
     private val GF_LOG = IntArray(256)
     init {
         var x = 1
         for (i in 0 until 255) {
-            GF_EXP[i] = x
-            GF_LOG[x] = i
+            GF_EXP[i] = x; GF_LOG[x] = i
             x = x shl 1
             if (x and 0x100 != 0) x = x xor 0x11D
         }
@@ -84,8 +96,7 @@ object QrEncoder {
     }
 
     private fun rsGenerator(deg: Int): IntArray {
-        val r = IntArray(deg)
-        r[deg - 1] = 1
+        val r = IntArray(deg); r[deg - 1] = 1
         var root = 1
         for (i in 0 until deg) {
             for (j in 0 until deg) {
@@ -115,24 +126,20 @@ object QrEncoder {
 
     private fun encodeData(bytes: ByteArray, ver: Int): List<Boolean> {
         val bits = mutableListOf<Boolean>()
-        appendBits(bits, 4, 4)
-        appendBits(bits, bytes.size, 8)
+        appendBits(bits, 4, 4); appendBits(bits, bytes.size, 8)
         for (b in bytes) appendBits(bits, b.toInt() and 0xFF, 8)
         val cap = dataCodewords(ver) * 8
-        val term = minOf(4, cap - bits.size)
-        repeat(term) { bits.add(false) }
+        repeat(minOf(4, cap - bits.size)) { bits.add(false) }
         while (bits.size % 8 != 0) bits.add(false)
         var pad = true
         while (bits.size < cap) {
-            appendBits(bits, if (pad) 0xEC else 0x11, 8)
-            pad = !pad
+            appendBits(bits, if (pad) 0xEC else 0x11, 8); pad = !pad
         }
         return bits
     }
 
     private fun bitsToCodewords(bits: List<Boolean>, ver: Int): IntArray {
-        val n = dataCodewords(ver)
-        val cw = IntArray(n)
+        val n = dataCodewords(ver); val cw = IntArray(n)
         for (i in 0 until n) {
             var b = 0
             for (j in 0 until 8) if (bits[i * 8 + j]) b = b or (1 shl (7 - j))
@@ -142,22 +149,14 @@ object QrEncoder {
     }
 
     private fun interleave(data: IntArray, ver: Int): IntArray {
-        val numBlocks = BLOCKS_M[ver - 1]
-        val eccLen = ECC_M[ver - 1]
-        val total = data.size
-        val shortSize = total / numBlocks
-        val numLong = total % numBlocks
-
-        val dataBlocks = mutableListOf<IntArray>()
-        val eccBlocks = mutableListOf<IntArray>()
+        val numBlocks = BLOCKS_M[ver - 1]; val eccLen = ECC_M[ver - 1]
+        val total = data.size; val shortSize = total / numBlocks; val numLong = total % numBlocks
+        val dataBlocks = mutableListOf<IntArray>(); val eccBlocks = mutableListOf<IntArray>()
         var pos = 0
         for (i in 0 until numBlocks) {
             val size = shortSize + if (i >= numBlocks - numLong) 1 else 0
-            val block = IntArray(size)
-            System.arraycopy(data, pos, block, 0, size)
-            pos += size
-            dataBlocks.add(block)
-            eccBlocks.add(rsEncode(block, eccLen))
+            val block = IntArray(size); System.arraycopy(data, pos, block, 0, size); pos += size
+            dataBlocks.add(block); eccBlocks.add(rsEncode(block, eccLen))
         }
         val out = mutableListOf<Int>()
         val maxData = shortSize + if (numLong > 0) 1 else 0
@@ -167,21 +166,13 @@ object QrEncoder {
     }
 
     private fun alignmentPositions(ver: Int): IntArray = when (ver) {
-        1 -> intArrayOf()
-        2 -> intArrayOf(6, 18)
-        3 -> intArrayOf(6, 22)
-        4 -> intArrayOf(6, 26)
-        5 -> intArrayOf(6, 30)
-        6 -> intArrayOf(6, 34)
-        7 -> intArrayOf(6, 22, 38)
-        8 -> intArrayOf(6, 24, 42)
-        9 -> intArrayOf(6, 26, 46)
+        1 -> intArrayOf(); 2 -> intArrayOf(6, 18); 3 -> intArrayOf(6, 22)
+        4 -> intArrayOf(6, 26); 5 -> intArrayOf(6, 30); 6 -> intArrayOf(6, 34)
+        7 -> intArrayOf(6, 22, 38); 8 -> intArrayOf(6, 24, 42); 9 -> intArrayOf(6, 26, 46)
         else -> intArrayOf()
     }
 
-    private fun placeFinder(
-        m: Array<BooleanArray>, res: Array<BooleanArray>, row: Int, col: Int
-    ) {
+    private fun placeFinder(m: Array<BooleanArray>, res: Array<BooleanArray>, row: Int, col: Int) {
         for (dr in -1..7) for (dc in -1..7) {
             val rr = row + dr; val cc = col + dc
             if (rr < 0 || rr >= m.size || cc < 0 || cc >= m.size) continue
@@ -192,9 +183,7 @@ object QrEncoder {
         }
     }
 
-    private fun placeAlignment(
-        m: Array<BooleanArray>, res: Array<BooleanArray>, row: Int, col: Int
-    ) {
+    private fun placeAlignment(m: Array<BooleanArray>, res: Array<BooleanArray>, row: Int, col: Int) {
         for (dr in 0..4) for (dc in 0..4) {
             res[row + dr][col + dc] = true
             val border = dr == 0 || dr == 4 || dc == 0 || dc == 4
@@ -205,18 +194,11 @@ object QrEncoder {
 
     private fun placeVersionInfo(m: Array<BooleanArray>, res: Array<BooleanArray>, ver: Int) {
         if (ver < 7) return
-        val v = VERSION_INFO[ver - 1]
-        val size = m.size
+        val v = VERSION_INFO[ver - 1]; val size = m.size
         for (i in 0 until 18) {
             val bit = ((v shr i) and 1) == 1
-            val trRow = i / 3
-            val trCol = size - 11 + (i % 3)
-            m[trRow][trCol] = bit
-            res[trRow][trCol] = true
-            val blRow = size - 11 + (i % 3)
-            val blCol = i / 3
-            m[blRow][blCol] = bit
-            res[blRow][blCol] = true
+            m[i / 3][size - 11 + (i % 3)] = bit; res[i / 3][size - 11 + (i % 3)] = true
+            m[size - 11 + (i % 3)][i / 3] = bit; res[size - 11 + (i % 3)][i / 3] = true
         }
     }
 
@@ -224,38 +206,21 @@ object QrEncoder {
         val size = 17 + 4 * ver
         val m = Array(size) { BooleanArray(size) }
         val res = Array(size) { BooleanArray(size) }
-
-        placeFinder(m, res, 0, 0)
-        placeFinder(m, res, 0, size - 7)
-        placeFinder(m, res, size - 7, 0)
-
+        placeFinder(m, res, 0, 0); placeFinder(m, res, 0, size - 7); placeFinder(m, res, size - 7, 0)
         val aps = alignmentPositions(ver)
         for (r in aps) for (c in aps) {
-            val topLeft = r == 6 && c == 6
-            val topRight = r == 6 && c == size - 7
-            val botLeft = r == size - 7 && c == 6
-            if (topLeft || topRight || botLeft) continue
+            if ((r == 6 && c == 6) || (r == 6 && c == size - 7) || (r == size - 7 && c == 6)) continue
             placeAlignment(m, res, r - 2, c - 2)
         }
-
         for (i in 8 until size - 8) {
             m[6][i] = i % 2 == 0; res[6][i] = true
             m[i][6] = i % 2 == 0; res[i][6] = true
         }
-
         m[size - 8][8] = true; res[size - 8][8] = true
-
         for (i in 0 until 9) { res[8][i] = true; res[i][8] = true }
-        for (i in 0 until 8) {
-            res[8][size - 1 - i] = true
-            res[size - 1 - i][8] = true
-        }
-
+        for (i in 0 until 8) { res[8][size - 1 - i] = true; res[size - 1 - i][8] = true }
         placeVersionInfo(m, res, ver)
-
-        var bit = 0
-        var col = size - 1
-        var up = true
+        var bit = 0; var col = size - 1; var up = true
         while (col > 0) {
             if (col == 6) col--
             for (row in 0 until size) {
@@ -264,17 +229,13 @@ object QrEncoder {
                     val c = col - k
                     if (res[r][c]) continue
                     if (bit < cw.size * 8) {
-                        val bi = bit / 8
-                        val bp = 7 - (bit % 8)
-                        m[r][c] = ((cw[bi] shr bp) and 1) == 1
+                        m[r][c] = ((cw[bit / 8] shr (7 - (bit % 8))) and 1) == 1
                         bit++
                     }
                 }
             }
-            up = !up
-            col -= 2
+            up = !up; col -= 2
         }
-
         return Pair(m, res)
     }
 
@@ -283,13 +244,6 @@ object QrEncoder {
             if (res[r][c]) continue
             val inv = when (mask) {
                 0 -> (r + c) % 2 == 0
-                1 -> r % 2 == 0
-                2 -> c % 3 == 0
-                3 -> (r + c) % 3 == 0
-                4 -> (r / 2 + c / 3) % 2 == 0
-                5 -> (r * c) % 2 + (r * c) % 3 == 0
-                6 -> ((r * c) % 2 + (r * c) % 3) % 2 == 0
-                7 -> ((r + c) % 2 + (r * c) % 3) % 2 == 0
                 else -> false
             }
             if (inv) m[r][c] = !m[r][c]
@@ -299,17 +253,12 @@ object QrEncoder {
     private fun bitOf(x: Int, i: Int) = ((x shr i) and 1) == 1
 
     private fun placeFormat(m: Array<BooleanArray>, mask: Int) {
-        val f = FORMAT_M[mask]
-        val s = m.size
-
-        // MSB (bit 14) -> (8,0), LSB (bit 0) -> (0,8) per spec
+        val f = FORMAT_M[mask]; val s = m.size
         m[8][0] = bitOf(f, 14); m[8][1] = bitOf(f, 13); m[8][2] = bitOf(f, 12)
         m[8][3] = bitOf(f, 11); m[8][4] = bitOf(f, 10); m[8][5] = bitOf(f, 9)
         m[8][7] = bitOf(f, 8); m[8][8] = bitOf(f, 7); m[7][8] = bitOf(f, 6)
         m[5][8] = bitOf(f, 5); m[4][8] = bitOf(f, 4); m[3][8] = bitOf(f, 3)
         m[2][8] = bitOf(f, 2); m[1][8] = bitOf(f, 1); m[0][8] = bitOf(f, 0)
-
-        // Second copy: MSB -> (s-1,8), LSB -> (8,s-1)
         m[s - 1][8] = bitOf(f, 14); m[s - 2][8] = bitOf(f, 13); m[s - 3][8] = bitOf(f, 12)
         m[s - 4][8] = bitOf(f, 11); m[s - 5][8] = bitOf(f, 10); m[s - 6][8] = bitOf(f, 9)
         m[s - 7][8] = bitOf(f, 8)
@@ -318,37 +267,24 @@ object QrEncoder {
         m[8][s - 2] = bitOf(f, 1); m[8][s - 1] = bitOf(f, 0)
     }
 
-    fun encode(text: String): Array<BooleanArray> {
+    fun renderBitmap(text: String, sizePx: Int): Bitmap? {
         val bytes = text.toByteArray(Charsets.UTF_8)
-        val ver = chooseVersion(bytes.size)
+        val ver = try { chooseVersion(bytes.size) } catch (e: Exception) { return null }
         val bits = encodeData(bytes, ver)
         val cw = bitsToCodewords(bits, ver)
         val all = interleave(cw, ver)
         val (m, res) = placeMatrix(all, ver)
-        applyMask(m, res, 0)
-        placeFormat(m, 0)
-        return m
-    }
+        applyMask(m, res, 0); placeFormat(m, 0)
 
-    fun renderBitmap(text: String, sizePx: Int): Bitmap? {
-        val m = try { encode(text) } catch (e: Exception) { return null }
-        val modules = m.size
-        val quiet = 4
-        val total = modules + quiet * 2
-        val scale = (sizePx / total).coerceAtLeast(1)
-        val bmpSize = total * scale
+        val modules = m.size; val quiet = 4; val total = modules + quiet * 2
+        val scale = (sizePx / total).coerceAtLeast(1); val bmpSize = total * scale
         val bmp = Bitmap.createBitmap(bmpSize, bmpSize, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bmp)
-        canvas.drawColor(Color.WHITE)
+        val canvas = Canvas(bmp); canvas.drawColor(Color.WHITE)
         val black = Paint().apply { color = Color.BLACK; isAntiAlias = false }
         for (r in 0 until modules) for (c in 0 until modules) {
             if (m[r][c]) {
-                val x = (c + quiet) * scale
-                val y = (r + quiet) * scale
-                canvas.drawRect(
-                    x.toFloat(), y.toFloat(),
-                    (x + scale).toFloat(), (y + scale).toFloat(), black
-                )
+                val x = (c + quiet) * scale; val y = (r + quiet) * scale
+                canvas.drawRect(x.toFloat(), y.toFloat(), (x + scale).toFloat(), (y + scale).toFloat(), black)
             }
         }
         return bmp
@@ -356,23 +292,20 @@ object QrEncoder {
 }
 
 // ============================================================
-// DATA MODELS
+// MODELS
 // ============================================================
 data class MsgItem(val from: String, val text: String, val ts: Long)
 
 data class Chan(
-    val id: String,
-    val name: String,
+    val id: String, val name: String,
     val messages: MutableList<MsgItem> = mutableListOf()
 )
 
 data class VaultItem(val type: String, val name: String, val content: String)
 
 data class Vault(
-    val id: String,
-    val name: String,
-    val items: MutableList<VaultItem> = mutableListOf(),
-    val received: Boolean = false
+    val id: String, val name: String,
+    val items: MutableList<VaultItem> = mutableListOf()
 )
 
 // ============================================================
@@ -381,7 +314,6 @@ data class Vault(
 object Store {
     private const val PREFS = "qrx_store_v1"
     private lateinit var ctx: Context
-
     val chans = mutableListOf<Chan>()
     val vaults = mutableListOf<Vault>()
 
@@ -390,11 +322,12 @@ object Store {
         load()
     }
 
+    fun appCtx(): Context = ctx
+
     fun load() {
         val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         chans.clear(); vaults.clear()
-        val cj = p.getString("chans", "[]") ?: "[]"
-        val carr = JSONArray(cj)
+        val carr = JSONArray(p.getString("chans", "[]") ?: "[]")
         for (i in 0 until carr.length()) {
             val o = carr.getJSONObject(i)
             val c = Chan(o.getString("id"), o.getString("name"))
@@ -405,11 +338,10 @@ object Store {
             }
             chans.add(c)
         }
-        val vj = p.getString("vaults", "[]") ?: "[]"
-        val varr = JSONArray(vj)
+        val varr = JSONArray(p.getString("vaults", "[]") ?: "[]")
         for (i in 0 until varr.length()) {
             val o = varr.getJSONObject(i)
-            val v = Vault(o.getString("id"), o.getString("name"), received = o.optBoolean("rec", false))
+            val v = Vault(o.getString("id"), o.getString("name"))
             val ia = o.optJSONArray("items") ?: JSONArray()
             for (j in 0 until ia.length()) {
                 val io = ia.getJSONObject(j)
@@ -425,21 +357,15 @@ object Store {
         for (c in chans) {
             val o = JSONObject().put("id", c.id).put("name", c.name)
             val ma = JSONArray()
-            for (m in c.messages) {
-                ma.put(JSONObject().put("f", m.from).put("t", m.text).put("ts", m.ts))
-            }
-            o.put("msgs", ma)
-            carr.put(o)
+            for (m in c.messages) ma.put(JSONObject().put("f", m.from).put("t", m.text).put("ts", m.ts))
+            o.put("msgs", ma); carr.put(o)
         }
         val varr = JSONArray()
         for (v in vaults) {
-            val o = JSONObject().put("id", v.id).put("name", v.name).put("rec", v.received)
+            val o = JSONObject().put("id", v.id).put("name", v.name)
             val ia = JSONArray()
-            for (i in v.items) {
-                ia.put(JSONObject().put("t", i.type).put("n", i.name).put("c", i.content))
-            }
-            o.put("items", ia)
-            varr.put(o)
+            for (i in v.items) ia.put(JSONObject().put("t", i.type).put("n", i.name).put("c", i.content))
+            o.put("items", ia); varr.put(o)
         }
         p.edit().putString("chans", carr.toString()).putString("vaults", varr.toString()).apply()
     }
@@ -450,19 +376,390 @@ object Store {
 }
 
 // ============================================================
+// LAN SERVER — plain HTTP/1.0 over raw socket, no deps
+// ============================================================
+object LanServer {
+    private var serverSocket: ServerSocket? = null
+    private var thread: Thread? = null
+    private lateinit var ctx: Context
+    @Volatile var port: Int = 0; private set
+    @Volatile private var running = false
+
+    fun start(appContext: Context) {
+        if (running) return
+        ctx = appContext
+        val prefs = ctx.getSharedPreferences("qrx_server", Context.MODE_PRIVATE)
+        val last = prefs.getInt("port", 8080)
+        val candidates = mutableListOf(last)
+        for (p in 8080..8090) if (p != last) candidates.add(p)
+        var s: ServerSocket? = null
+        for (p in candidates) {
+            try { s = ServerSocket(p); port = p; break } catch (e: Exception) { }
+        }
+        if (s == null) return
+        prefs.edit().putInt("port", port).apply()
+        serverSocket = s
+        running = true
+        thread = Thread {
+            while (running) {
+                try {
+                    val client = s.accept()
+                    Thread { handleClient(client) }.start()
+                } catch (e: Exception) { if (!running) break }
+            }
+        }.also { it.isDaemon = true; it.start() }
+    }
+
+    fun stop() {
+        running = false
+        try { serverSocket?.close() } catch (e: Exception) { }
+        serverSocket = null
+    }
+
+    fun lanIp(): String? {
+        try {
+            val ifaces = Collections.list(NetworkInterface.getNetworkInterfaces())
+                .filter { it.isUp && !it.isLoopback }
+                .sortedByDescending { it.name.startsWith("wlan") }
+            for (iface in ifaces) {
+                for (addr in Collections.list(iface.inetAddresses)) {
+                    if (addr is Inet4Address && !addr.isLoopbackAddress) return addr.hostAddress
+                }
+            }
+        } catch (e: Exception) { }
+        return null
+    }
+
+    private fun handleClient(socket: Socket) {
+        try {
+            socket.use { sock ->
+                sock.soTimeout = 15000
+                val inp = sock.getInputStream()
+                val hbuf = ByteArrayOutputStream()
+                val ring = IntArray(4)
+                while (true) {
+                    val b = inp.read()
+                    if (b < 0) break
+                    hbuf.write(b)
+                    ring[0] = ring[1]; ring[1] = ring[2]; ring[2] = ring[3]; ring[3] = b
+                    if (ring[0] == '\r'.code && ring[1] == '\n'.code &&
+                        ring[2] == '\r'.code && ring[3] == '\n'.code) break
+                    if (hbuf.size() > 8192) break
+                }
+                val headerText = hbuf.toString("UTF-8")
+                var contentLen = 0
+                for (line in headerText.split("\r\n")) {
+                    if (line.startsWith("Content-Length:", ignoreCase = true)) {
+                        contentLen = line.substringAfter(":").trim().toIntOrNull() ?: 0
+                    }
+                }
+                val bodySb = StringBuilder()
+                if (contentLen > 0) {
+                    val raw = ByteArray(contentLen); var got = 0
+                    while (got < contentLen) {
+                        val r = inp.read(raw, got, contentLen - got)
+                        if (r <= 0) break
+                        got += r
+                    }
+                    bodySb.append(String(raw, 0, got, Charsets.UTF_8))
+                }
+                val line1 = headerText.substringBefore("\r\n")
+                val parts = line1.split(" ")
+                if (parts.size < 2) return
+                val method = parts[0]
+                val fullPath = parts[1]
+                val path = fullPath.substringBefore('?')
+                val qs = fullPath.substringAfter('?', "")
+                route(sock.getOutputStream(), method, path, qs, bodySb.toString())
+            }
+        } catch (e: Exception) { }
+    }
+
+    private fun route(out: OutputStream, method: String, path: String, qs: String, body: String) {
+        val seg = path.trimStart('/').split('/').filter { it.isNotEmpty() }
+        try {
+            when {
+                seg.size == 2 && seg[0] == "c" && method == "GET" -> {
+                    val name = try {
+                        Uri.parse("http://x/?$qs").getQueryParameter("n")
+                    } catch (e: Exception) { null } ?: "?"
+                    sendHtml(out, composePage(seg[1], name))
+                }
+                seg.size == 2 && seg[0] == "s" && method == "POST" -> {
+                    val params = parseForm(body)
+                    val from = params["f"]?.trim().orEmpty().ifEmpty { "مجهول" }
+                    val msg = params["m"]?.trim().orEmpty()
+                    val ch = Store.findChan(seg[1])
+                    if (ch != null && msg.isNotEmpty()) {
+                        ch.messages.add(MsgItem(from, msg, System.currentTimeMillis()))
+                        Store.save()
+                    }
+                    sendHtml(out, thanksPage(from))
+                }
+                seg.size == 4 && seg[0] == "v" && seg[2] == "raw" && method == "GET" -> {
+                    val v = Store.findVault(seg[1])
+                    val idx = seg[3].toIntOrNull()
+                    val item = if (v != null && idx != null) v.items.getOrNull(idx) else null
+                    if (item == null) send404(out) else serveBytes(out, item)
+                }
+                seg.size == 2 && seg[0] == "v" && method == "GET" -> {
+                    val v = Store.findVault(seg[1])
+                    if (v == null) send404(out) else sendHtml(out, vaultPage(v))
+                }
+                else -> send404(out)
+            }
+        } catch (e: Exception) {
+            try { send500(out) } catch (x: Exception) { }
+        }
+    }
+
+    private fun parseForm(body: String): Map<String, String> {
+        val m = mutableMapOf<String, String>()
+        for (pair in body.split("&")) {
+            val i = pair.indexOf('='); if (i < 0) continue
+            val k = URLDecoder.decode(pair.substring(0, i), "UTF-8")
+            val v = URLDecoder.decode(pair.substring(i + 1), "UTF-8")
+            m[k] = v
+        }
+        return m
+    }
+
+    private fun sendHtml(out: OutputStream, html: String) {
+        val b = html.toByteArray(Charsets.UTF_8)
+        val h = "HTTP/1.0 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: ${b.size}\r\nConnection: close\r\n\r\n"
+        out.write(h.toByteArray(Charsets.UTF_8)); out.write(b); out.flush()
+    }
+
+    private fun send404(out: OutputStream) {
+        val b = "<!DOCTYPE html><html><body style='background:#000;color:#fff;text-align:center;padding:40px;font-family:sans-serif'><h1>404</h1><p>غير موجود</p></body></html>".toByteArray(Charsets.UTF_8)
+        val h = "HTTP/1.0 404 Not Found\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: ${b.size}\r\nConnection: close\r\n\r\n"
+        out.write(h.toByteArray(Charsets.UTF_8)); out.write(b); out.flush()
+    }
+
+    private fun send500(out: OutputStream) {
+        val b = "<h1>500</h1>".toByteArray(Charsets.UTF_8)
+        out.write("HTTP/1.0 500\r\nContent-Type: text/html\r\nContent-Length: ${b.size}\r\nConnection: close\r\n\r\n".toByteArray()); out.write(b); out.flush()
+    }
+
+    private fun serveBytes(out: OutputStream, item: VaultItem) {
+        try {
+            val uri = Uri.parse(item.content)
+            val input = ctx.contentResolver.openInputStream(uri)
+            if (input == null) { send404(out); return }
+            val mime = ctx.contentResolver.getType(uri) ?: "application/octet-stream"
+            val safeName = item.name.replace("\"", "").replace("\n", " ")
+            out.write(("HTTP/1.0 200 OK\r\nContent-Type: $mime\r\nContent-Disposition: inline; filename=\"$safeName\"\r\nConnection: close\r\n\r\n").toByteArray(Charsets.UTF_8))
+            val buf = ByteArray(64 * 1024); var n: Int
+            while (input.read(buf).also { n = it } > 0) out.write(buf, 0, n)
+            input.close(); out.flush()
+        } catch (e: Exception) { try { send404(out) } catch (x: Exception) { } }
+    }
+
+    private fun esc(s: String): String = s
+        .replace("&", "&amp;").replace("<", "&lt;")
+        .replace(">", "&gt;").replace("\"", "&quot;")
+
+    private fun composePage(chanId: String, name: String): String {
+        val safe = esc(name)
+        val initial = if (name.isNotEmpty()) name.substring(0, 1).uppercase() else "A"
+        return """<!DOCTYPE html>
+<html dir="rtl" lang="ar"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>$safe</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:#0f0f0f;color:#fff;font-family:Roboto,system-ui,sans-serif}
+.topbar{display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid #222;background:#0f0f0f;position:sticky;top:0;z-index:10}
+.logo{color:#f00;font-weight:700;font-size:18px}
+.spacer{flex:1}
+.chline{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid #222;background:#0f0f0f}
+.av{width:44px;height:44px;border-radius:50%;background:linear-gradient(135deg,#f00,#a00);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:20px;flex-shrink:0}
+.chname{font-weight:600;font-size:15px}
+.subs{font-size:12px;color:#aaa;margin-top:2px}
+.subbtn{background:#f00;color:#fff;border:none;padding:8px 16px;border-radius:18px;font-weight:600;font-size:13px;margin-right:auto}
+.video{position:relative;width:100%;padding-bottom:56.25%;background:#000}
+.video iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+.meta{padding:12px 16px}
+.title{font-weight:600;font-size:15px;margin-bottom:4px;line-height:1.4}
+.metasmall{font-size:12px;color:#aaa}
+.divider{height:1px;background:#272727;margin:12px 0}
+.comments{padding:0 16px 32px}
+.form{display:flex;flex-direction:column;gap:14px}
+.row{display:flex;gap:10px;align-items:center}
+.row input{flex:1;background:transparent;border:none;border-bottom:1px solid #333;padding:10px 4px;color:#fff;font-size:15px;outline:none;font-family:inherit}
+.row input:focus{border-bottom-color:#fff}
+.row input::placeholder{color:#888}
+button{background:#f00;color:#fff;border:none;border-radius:22px;padding:11px 22px;font-weight:600;font-size:14px;cursor:pointer;font-family:inherit}
+button:active{background:#c00}
+.hint{color:#666;font-size:11px;text-align:center;padding:20px 12px}
+</style></head><body>
+<div class="topbar"><span class="logo">▶ YouTube</span></div>
+<div class="chline">
+  <div class="av">$initial</div>
+  <div><div class="chname">$safe</div><div class="subs">قناة QRX • مشترك</div></div>
+  <button class="subbtn" type="button">مشترك ✓</button>
+</div>
+<div class="video">
+  <iframe src="https://www.youtube.com/embed/aqz-KE-bpKQ?rel=0" allowfullscreen></iframe>
+</div>
+<div class="meta">
+  <div class="title">اكتب رسالتك لقناة $safe</div>
+  <div class="metasmall">ستُسلَّم الرسالة إلى تطبيق QRX على جهاز صاحب القناة</div>
+</div>
+<div class="divider"></div>
+<div class="comments">
+  <form class="form" method="POST" action="/s/$chanId">
+    <div class="row">
+      <div class="av" style="width:36px;height:36px;font-size:16px">${"$"}{initial}</div>
+      <input type="text" name="f" placeholder="اسمك" required maxlength="40">
+    </div>
+    <div class="row">
+      <input type="text" name="m" placeholder="أضف تعليقاً عاماً..." required maxlength="400" autofocus>
+    </div>
+    <div class="row" style="justify-content:flex-end">
+      <button type="submit">إرسال</button>
+    </div>
+  </form>
+</div>
+<div class="hint">📶 يجب أن تكون على نفس شبكة WiFi — أبقِ تطبيق QRX مفتوحاً على جهاز المستقبل</div>
+</body></html>""".replace("\${initial}", initial)
+    }
+
+    private fun thanksPage(from: String): String {
+        val safe = esc(from)
+        return """<!DOCTYPE html>
+<html dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>تم الإرسال</title>
+<style>
+body{margin:0;background:#0f0f0f;color:#fff;font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px}
+.box{background:#181818;border-radius:16px;padding:32px 24px;max-width:400px;width:100%;text-align:center;border:1px solid #222}
+.ic{font-size:64px;margin-bottom:8px}
+h1{font-size:20px;margin:0 0 12px}
+p{color:#aaa;font-size:14px;line-height:1.6;margin:0}
+.sign{margin-top:16px;color:#666;font-size:12px}
+</style></head><body>
+<div class="box">
+  <div class="ic">✅</div>
+  <h1>تم إرسال رسالتك</h1>
+  <p>وصلت إلى تطبيق QRX على جهاز صاحب القناة.</p>
+  <p class="sign">— $safe</p>
+</div>
+</body></html>"""
+    }
+
+    private fun vaultPage(v: Vault): String {
+        val sb = StringBuilder()
+        for ((idx, item) in v.items.withIndex()) {
+            sb.append("<div class=\"card\">")
+            when (item.type) {
+                "image" -> {
+                    sb.append("<div class=\"tag t-img\">📷 صورة</div>")
+                    sb.append("<h3>${esc(item.name)}</h3>")
+                    sb.append("<img src=\"/v/${v.id}/raw/$idx\" alt=\"\">")
+                }
+                "file" -> {
+                    sb.append("<div class=\"tag t-file\">📎 ملف</div>")
+                    sb.append("<h3>${esc(item.name)}</h3>")
+                    sb.append("<a href=\"/v/${v.id}/raw/$idx\" download>⬇ تنزيل الملف</a>")
+                }
+                "app" -> {
+                    sb.append("<div class=\"tag t-app\">📱 تطبيق</div>")
+                    sb.append("<h3>${esc(item.name)}</h3>")
+                    sb.append("<div class=\"body\">الحزمة: <code>${esc(item.content)}</code></div>")
+                }
+                else -> {
+                    sb.append("<div class=\"tag t-text\">📝 نص</div>")
+                    sb.append("<h3>${esc(item.name)}</h3>")
+                    sb.append("<div class=\"body\">${esc(item.content)}</div>")
+                }
+            }
+            sb.append("</div>")
+        }
+        val safe = esc(v.name)
+        return """<!DOCTYPE html>
+<html dir="rtl" lang="ar"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>خزنة $safe</title>
+<style>
+body{margin:0;background:#0f0f0f;color:#fff;font-family:system-ui,sans-serif;padding:16px 16px 40px}
+h1{font-size:19px;margin:0 0 4px}
+.count{color:#888;font-size:12px;margin-bottom:18px}
+.card{background:#181818;border:1px solid #262626;border-radius:12px;padding:14px;margin-bottom:12px;overflow:hidden}
+.card h3{margin:6px 0 8px;font-size:15px;font-weight:600;word-break:break-word}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:3px 8px;border-radius:10px;margin-bottom:2px}
+.t-img{background:#3a0a0a;color:#f77}
+.t-file{background:#0a1e3a;color:#7af}
+.t-app{background:#1f0a3a;color:#c7f}
+.t-text{background:#2a2a0a;color:#ee7}
+.body{color:#ccc;white-space:pre-wrap;word-break:break-word;font-size:14px;line-height:1.55}
+.card img{width:100%;border-radius:8px;display:block;margin-top:6px;background:#000}
+.card a{display:inline-block;color:#0af;text-decoration:none;font-weight:600;padding:8px 0;font-size:14px}
+code{background:#000;padding:2px 6px;border-radius:4px;font-size:12px;color:#7ff}
+.hint{color:#666;font-size:11px;text-align:center;padding:20px 8px;line-height:1.6}
+</style></head><body>
+<h1>🗄 $safe</h1>
+<div class="count">${v.items.size} عنصر</div>
+$sb
+<div class="hint">📶 يجب أن تكون على نفس شبكة WiFi — المحتوى يُبث مباشرة من جهاز صاحب الخزنة</div>
+</body></html>"""
+    }
+}
+
+// ============================================================
+// FOREGROUND SERVICE
+// ============================================================
+class QrxService : Service() {
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val chId = "qrx_server"
+        val nm = getSystemService(NotificationManager::class.java)
+        if (Build.VERSION.SDK_INT >= 26) {
+            nm.createNotificationChannel(
+                NotificationChannel(chId, "QRX Server", NotificationManager.IMPORTANCE_LOW)
+            )
+        }
+        val notif: Notification = if (Build.VERSION.SDK_INT >= 26) {
+            Notification.Builder(this, chId)
+        } else {
+            @Suppress("DEPRECATION") Notification.Builder(this)
+        }
+            .setContentTitle("QRX يعمل")
+            .setContentText("في انتظار الرسائل على الشبكة المحلية")
+            .setSmallIcon(android.R.drawable.ic_menu_view)
+            .setOngoing(true)
+            .build()
+
+        try {
+            if (Build.VERSION.SDK_INT >= 34) {
+                startForeground(42, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            } else {
+                startForeground(42, notif)
+            }
+        } catch (e: Exception) { }
+
+        LanServer.start(applicationContext)
+        return START_STICKY
+    }
+
+    override fun onDestroy() {
+        LanServer.stop()
+        super.onDestroy()
+    }
+}
+
+// ============================================================
 // MAIN ACTIVITY
 // ============================================================
 class MainActivity : Activity() {
-
     private var screen: String = "home"
     private var currentChanId: String? = null
     private var currentVaultId: String? = null
-    private var pendingReplyChanId: String? = null
-    private var pendingReplyChanName: String? = null
     private var pendingVaultIdForPick: String? = null
 
     private val REQ_PICK_IMAGE = 1001
     private val REQ_PICK_FILE = 1002
+    private val REQ_NOTIF = 2001
 
     private val BG = 0xFF0E1620.toInt()
     private val FG = 0xFFE8EEF5.toInt()
@@ -474,15 +771,19 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Store.init(this)
-        handleIntent(intent)
+        requestNotifPerm()
+        val si = Intent(this, QrxService::class.java)
+        try {
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(si) else startService(si)
+        } catch (e: Exception) { }
         render()
     }
 
-    override fun onNewIntent(intent: Intent?) {
-        super.onNewIntent(intent)
-        if (intent != null) {
-            handleIntent(intent)
-            render()
+    private fun requestNotifPerm() {
+        if (Build.VERSION.SDK_INT >= 33) {
+            if (checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), REQ_NOTIF)
+            }
         }
     }
 
@@ -494,15 +795,10 @@ class MainActivity : Activity() {
         pendingVaultIdForPick = null
         val v = Store.findVault(vaultId) ?: return
         try {
-            contentResolver.takePersistableUriPermission(
-                uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
-            )
+            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         } catch (e: Exception) { }
-        val name = uri.lastPathSegment?.substringAfterLast('/')?.take(48) ?: "عنصر"
-        val type = when (requestCode) {
-            REQ_PICK_IMAGE -> "image"
-            else -> "file"
-        }
+        val name = uri.lastPathSegment?.substringAfterLast('/')?.take(60) ?: "عنصر"
+        val type = if (requestCode == REQ_PICK_IMAGE) "image" else "file"
         v.items.add(VaultItem(type, name, uri.toString()))
         Store.save()
         currentVaultId = vaultId
@@ -510,74 +806,6 @@ class MainActivity : Activity() {
         render()
     }
 
-    private fun handleIntent(intent: Intent) {
-        val data: Uri = intent.data ?: return
-        when (data.scheme) {
-            "msgv1" -> handleMsgUri(data)
-            "vaultv1" -> handleVaultUri(data)
-        }
-    }
-
-    private fun handleMsgUri(uri: Uri) {
-        val path = uri.pathSegments
-        if (path.isEmpty()) return
-        when (path[0]) {
-            "chan" -> {
-                if (path.size < 2) return
-                val id = path[1]
-                val name = uri.getQueryParameter("n") ?: "?"
-                val own = Store.findChan(id)
-                if (own != null) {
-                    screen = "chan_inbox"; currentChanId = id
-                } else {
-                    pendingReplyChanId = id; pendingReplyChanName = name
-                    screen = "write_reply"
-                }
-            }
-            "msg" -> {
-                if (path.size < 2) return
-                val id = path[1]
-                val from = uri.getQueryParameter("f") ?: "?"
-                val msgB64 = uri.getQueryParameter("m") ?: return
-                val msg = try {
-                    String(Base64.decode(msgB64, Base64.URL_SAFE or Base64.NO_WRAP), Charsets.UTF_8)
-                } catch (e: Exception) { return }
-                val chan = Store.findChan(id)
-                if (chan != null) {
-                    chan.messages.add(MsgItem(from, msg, System.currentTimeMillis()))
-                    Store.save()
-                    Toast.makeText(this, "رسالة جديدة من $from", Toast.LENGTH_SHORT).show()
-                    screen = "chan_inbox"; currentChanId = id
-                } else {
-                    Toast.makeText(this, "قناة غير معروفة: $id", Toast.LENGTH_LONG).show()
-                }
-            }
-        }
-    }
-
-    private fun handleVaultUri(uri: Uri) {
-        val path = uri.pathSegments
-        if (path.isEmpty() || path[0] != "pack") return
-        val name = uri.getQueryParameter("n") ?: "vault"
-        val itemsB64 = uri.getQueryParameter("d") ?: return
-        try {
-            val json = String(Base64.decode(itemsB64, Base64.URL_SAFE or Base64.NO_WRAP), Charsets.UTF_8)
-            val arr = JSONArray(json)
-            val v = Vault(Store.newId(), name, received = true)
-            for (i in 0 until arr.length()) {
-                val o = arr.getJSONObject(i)
-                v.items.add(VaultItem(o.getString("t"), o.getString("n"), o.getString("c")))
-            }
-            Store.vaults.add(v)
-            Store.save()
-            Toast.makeText(this, "تم استلام خزنة: $name", Toast.LENGTH_SHORT).show()
-            screen = "vault_view"; currentVaultId = v.id
-        } catch (e: Exception) {
-            Toast.makeText(this, "بيانات خزنة تالفة", Toast.LENGTH_LONG).show()
-        }
-    }
-
-    // ---------- UI builders ----------
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
     private fun baseRoot(): LinearLayout {
@@ -588,8 +816,7 @@ class MainActivity : Activity() {
         }
         val title = TextView(this).apply {
             text = "QRX"
-            setTextColor(ACCENT)
-            textSize = 22f
+            setTextColor(ACCENT); textSize = 22f
             typeface = Typeface.DEFAULT_BOLD
             setPadding(0, 0, 0, dp(12))
         }
@@ -597,17 +824,15 @@ class MainActivity : Activity() {
         return root
     }
 
-    private fun label(txt: String, color: Int = FG, size: Float = 14f): TextView =
+    private fun label(t: String, color: Int = FG, size: Float = 14f): TextView =
         TextView(this).apply {
-            text = txt; setTextColor(color); textSize = size
+            text = t; setTextColor(color); textSize = size
             setPadding(0, dp(4), 0, dp(4))
         }
 
-    private fun btn(txt: String, onClick: () -> Unit): Button =
+    private fun btn(t: String, onClick: () -> Unit): Button =
         Button(this).apply {
-            text = txt
-            setTextColor(BG)
-            setBackgroundColor(ACCENT)
+            text = t; setTextColor(BG); setBackgroundColor(ACCENT)
             setOnClickListener { onClick() }
             setPadding(dp(10), dp(6), dp(10), dp(6))
             layoutParams = LinearLayout.LayoutParams(
@@ -615,11 +840,9 @@ class MainActivity : Activity() {
             ).also { it.topMargin = dp(6); it.bottomMargin = dp(6) }
         }
 
-    private fun btnSecondary(txt: String, onClick: () -> Unit): Button =
+    private fun btnSecondary(t: String, onClick: () -> Unit): Button =
         Button(this).apply {
-            text = txt
-            setTextColor(FG)
-            setBackgroundColor(CARD)
+            text = t; setTextColor(FG); setBackgroundColor(CARD)
             setOnClickListener { onClick() }
             setPadding(dp(10), dp(6), dp(10), dp(6))
             layoutParams = LinearLayout.LayoutParams(
@@ -629,34 +852,33 @@ class MainActivity : Activity() {
 
     private fun input(hint: String, multi: Boolean = false): EditText =
         EditText(this).apply {
-            this.hint = hint
-            setTextColor(FG)
-            setHintTextColor(MUTED)
-            setBackgroundColor(CARD)
+            this.hint = hint; setTextColor(FG); setHintTextColor(MUTED); setBackgroundColor(CARD)
             setPadding(dp(10), dp(8), dp(10), dp(8))
-            inputType = if (multi)
-                InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            inputType = if (multi) InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
             else InputType.TYPE_CLASS_TEXT
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
             ).also { it.topMargin = dp(4); it.bottomMargin = dp(4) }
         }
 
+    private fun serverBase(): String? {
+        val ip = LanServer.lanIp() ?: return null
+        if (LanServer.port == 0) return null
+        return "http://$ip:${LanServer.port}"
+    }
+
     private fun render() {
         val root = baseRoot()
         val scroll = ScrollView(this)
         val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         scroll.addView(content)
-        root.addView(scroll, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
-        ))
+        root.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         when (screen) {
             "home" -> buildHome(content)
             "messages" -> buildMessages(content)
             "create_chan" -> buildCreateChan(content)
             "chan_qr" -> buildChanQr(content)
             "chan_inbox" -> buildChanInbox(content)
-            "write_reply" -> buildWriteReply(content)
             "vaults" -> buildVaults(content)
             "vault_view" -> buildVaultView(content)
             "vault_qr" -> buildVaultQr(content)
@@ -666,15 +888,23 @@ class MainActivity : Activity() {
     }
 
     private fun buildHome(c: LinearLayout) {
+        val base = serverBase()
+        if (base == null) {
+            c.addView(label("⚠ لا اتصال WiFi أو الخادم لم يبدأ بعد.", DANGER, 12f))
+            c.addView(label("اتصل بشبكة WiFi وأعد المحاولة.", MUTED, 11f))
+        } else {
+            c.addView(label("📶 الخادم يعمل: ${LanServer.lanIp()}:${LanServer.port}", MUTED, 11f))
+        }
         c.addView(label("القسم الأول — رسائل QR", ACCENT, 16f))
         c.addView(btn("فتح قسم الرسائل") { screen = "messages"; render() })
         c.addView(label("القسم الثاني — خزنة QR", ACCENT, 16f))
         c.addView(btn("فتح قسم الخزنة") { screen = "vaults"; render() })
+        c.addView(label("آخر رسالة جديدة ستظهر في القسم الأول.", MUTED, 11f))
     }
 
     private fun buildMessages(c: LinearLayout) {
         c.addView(btnSecondary("← رجوع") { screen = "home"; render() })
-        c.addView(label("الفرع الأول — إنشاء باركود", ACCENT, 16f))
+        c.addView(label("الفرع الأول — إنشاء قناة", ACCENT, 16f))
         c.addView(btn("إنشاء قناة جديدة") { screen = "create_chan"; render() })
         c.addView(label("الفرع الثاني — صندوق الرسائل", ACCENT, 16f))
         if (Store.chans.isEmpty()) {
@@ -683,14 +913,9 @@ class MainActivity : Activity() {
             for (ch in Store.chans) {
                 val row = TextView(this).apply {
                     text = "${ch.name}  (${ch.messages.size})"
-                    setTextColor(FG)
-                    setBackgroundColor(CARD)
+                    setTextColor(FG); setBackgroundColor(CARD)
                     setPadding(dp(12), dp(10), dp(12), dp(10))
-                    setOnClickListener {
-                        currentChanId = ch.id
-                        screen = "chan_inbox"
-                        render()
-                    }
+                    setOnClickListener { currentChanId = ch.id; screen = "chan_inbox"; render() }
                     layoutParams = LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
                     ).also { it.topMargin = dp(4) }
@@ -698,8 +923,6 @@ class MainActivity : Activity() {
                 c.addView(row)
             }
         }
-        c.addView(btnSecondary("لصق باركود وارد (رد)") { showPasteDialog("msgv1") })
-        c.addView(btnSecondary("لصق باركود وارد (خزنة)") { showPasteDialog("vaultv1") })
     }
 
     private fun buildCreateChan(c: LinearLayout) {
@@ -711,34 +934,32 @@ class MainActivity : Activity() {
             val nm = nameInput.text.toString().trim()
             if (nm.isEmpty()) { toast("اكتب اسماً"); return@btn }
             val ch = Chan(Store.newId(), nm)
-            Store.chans.add(ch)
-            Store.save()
-            currentChanId = ch.id
-            screen = "chan_qr"
-            render()
+            Store.chans.add(ch); Store.save()
+            currentChanId = ch.id; screen = "chan_qr"; render()
         })
     }
 
     private fun buildChanQr(c: LinearLayout) {
         val ch = Store.findChan(currentChanId ?: return) ?: return
         c.addView(btnSecondary("← رجوع") { screen = "chan_inbox"; render() })
-        c.addView(label("شارك هذا الباركود: ${ch.name}", ACCENT))
-        val payload = "msgv1://chan/${ch.id}?n=${Uri.encode(ch.name)}"
-        val bmp = QrEncoder.renderBitmap(payload, 900)
-        if (bmp == null) {
-            c.addView(label("البيانات طويلة جداً — قصّر اسم القناة", DANGER))
+        val base = serverBase()
+        if (base == null) {
+            c.addView(label("⚠ لا شبكة WiFi أو الخادم لم يبدأ — أعد تشغيل التطبيق على WiFi.", DANGER))
             return
         }
-        val iv = ImageView(this).apply {
-            setImageBitmap(bmp)
-            adjustViewBounds = true
+        val url = "$base/c/${ch.id}?n=${Uri.encode(ch.name)}"
+        c.addView(label("امسح الباركود بأي كاميرا:", ACCENT))
+        val bmp = QrEncoder.renderBitmap(url, 900)
+        if (bmp == null) { c.addView(label("البيانات طويلة جداً", DANGER)); return }
+        c.addView(ImageView(this).apply {
+            setImageBitmap(bmp); adjustViewBounds = true
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
             ).also { it.topMargin = dp(8) }
-        }
-        c.addView(iv)
-        c.addView(btnSecondary("نسخ نص الباركود") { copy(payload) })
+        })
+        c.addView(label(url, MUTED, 10f))
         c.addView(btn("فتح صندوق الرسائل") { screen = "chan_inbox"; render() })
+        c.addView(label("⚠ يجب أن يكون الماسح على نفس شبكة WiFi.", MUTED, 11f))
     }
 
     private fun buildChanInbox(c: LinearLayout) {
@@ -747,13 +968,12 @@ class MainActivity : Activity() {
         c.addView(label("صندوق: ${ch.name}", ACCENT, 16f))
         c.addView(btnSecondary("عرض باركود القناة") { screen = "chan_qr"; render() })
         if (ch.messages.isEmpty()) {
-            c.addView(label("لا توجد رسائل بعد.", MUTED))
+            c.addView(label("لا توجد رسائل بعد — بانتظار وصولها...", MUTED))
         } else {
             for (m in ch.messages.reversed()) {
                 val v = TextView(this).apply {
                     text = "[${m.from}]\n${m.text}"
-                    setTextColor(FG)
-                    setBackgroundColor(CARD)
+                    setTextColor(FG); setBackgroundColor(CARD)
                     setPadding(dp(12), dp(10), dp(12), dp(10))
                     layoutParams = LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
@@ -762,39 +982,18 @@ class MainActivity : Activity() {
                 c.addView(v)
             }
         }
-        c.addView(btnSecondary("لصق رد وارد") { showPasteDialog("msgv1") })
-    }
-
-    private fun buildWriteReply(c: LinearLayout) {
-        val id = pendingReplyChanId ?: return
-        val name = pendingReplyChanName ?: "?"
-        c.addView(btnSecondary("← رجوع") { screen = "home"; render() })
-        c.addView(label("إرسال رسالة إلى: $name", ACCENT, 16f))
-        val fromInput = input("اسمك")
-        val msgInput = input("نص الرسالة", multi = true)
-        msgInput.minLines = 3
-        msgInput.movementMethod = ScrollingMovementMethod()
-        c.addView(fromInput); c.addView(msgInput)
-        c.addView(btn("توليد باركود الرد") {
-            val f = fromInput.text.toString().trim().ifEmpty { "?" }
-            val m = msgInput.text.toString().trim()
-            if (m.isEmpty()) { toast("اكتب رسالة"); return@btn }
-            val b64 = Base64.encodeToString(m.toByteArray(Charsets.UTF_8), Base64.URL_SAFE or Base64.NO_WRAP)
-            val uri = "msgv1://msg/$id?n=${Uri.encode(name)}&f=${Uri.encode(f)}&m=$b64"
-            showQrDialog(uri, "أظهر هذا الباركود للمرسل")
-        })
+        c.addView(btnSecondary("تحديث") { render() })
     }
 
     private fun buildVaults(c: LinearLayout) {
         c.addView(btnSecondary("← رجوع") { screen = "home"; render() })
         c.addView(btn("إنشاء خزنة جديدة") { createVaultDialog() })
-        c.addView(btnSecondary("لصق باركود خزنة وارد") { showPasteDialog("vaultv1") })
         if (Store.vaults.isEmpty()) {
             c.addView(label("لا توجد خزائن بعد.", MUTED))
         } else {
             for (v in Store.vaults) {
                 val tv = TextView(this).apply {
-                    text = "${v.name}  (${v.items.size})${if (v.received) " • مستلمة" else ""}"
+                    text = "${v.name}  (${v.items.size})"
                     setTextColor(FG); setBackgroundColor(CARD)
                     setPadding(dp(12), dp(10), dp(12), dp(10))
                     setOnClickListener { currentVaultId = v.id; screen = "vault_view"; render() }
@@ -814,8 +1013,7 @@ class MainActivity : Activity() {
         if (v.items.isEmpty()) c.addView(label("فارغة.", MUTED))
         for ((idx, item) in v.items.withIndex()) {
             val row = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setBackgroundColor(CARD)
+                orientation = LinearLayout.VERTICAL; setBackgroundColor(CARD)
                 setPadding(dp(12), dp(8), dp(12), dp(8))
                 layoutParams = LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
@@ -829,111 +1027,75 @@ class MainActivity : Activity() {
                         layoutParams = LinearLayout.LayoutParams(dp(64), dp(64))
                     }
                     header.addView(thumb)
-                    val tv = TextView(this).apply {
-                        text = "🖼 ${item.name}"
-                        setTextColor(FG); setPadding(dp(8), 0, 0, 0)
-                    }
-                    header.addView(tv)
+                    header.addView(TextView(this).apply {
+                        text = "🖼 ${item.name}"; setTextColor(FG); setPadding(dp(8), 0, 0, 0)
+                    })
                 }
                 "app" -> {
                     val icon = ImageView(this).apply {
-                        val pm = packageManager
                         try {
-                            val info = pm.getApplicationInfo(item.content, 0)
-                            setImageDrawable(pm.getApplicationIcon(info))
+                            val info = packageManager.getApplicationInfo(item.content, 0)
+                            setImageDrawable(packageManager.getApplicationIcon(info))
                         } catch (e: Exception) { }
                         layoutParams = LinearLayout.LayoutParams(dp(48), dp(48))
                     }
                     header.addView(icon)
-                    val tv = TextView(this).apply {
-                        text = "📱 ${item.name}"
-                        setTextColor(FG); setPadding(dp(8), 0, 0, 0)
-                    }
-                    header.addView(tv)
+                    header.addView(TextView(this).apply {
+                        text = "📱 ${item.name}"; setTextColor(FG); setPadding(dp(8), 0, 0, 0)
+                    })
                 }
-                "file" -> {
-                    val tv = TextView(this).apply {
-                        text = "📎 ${item.name}"
-                        setTextColor(FG)
-                    }
-                    header.addView(tv)
-                }
-                else -> {
-                    val tv = TextView(this).apply {
-                        text = "📝 ${item.name}"
-                        setTextColor(FG)
-                    }
-                    header.addView(tv)
-                }
+                "file" -> header.addView(TextView(this).apply { text = "📎 ${item.name}"; setTextColor(FG) })
+                else -> header.addView(TextView(this).apply { text = "📝 ${item.name}"; setTextColor(FG) })
             }
             row.addView(header)
-            if (item.type == "text") {
-                val body = TextView(this).apply {
-                    text = item.content.take(300)
-                    setTextColor(MUTED)
-                    setPadding(0, dp(4), 0, 0)
-                }
-                row.addView(body)
-            }
-            row.setOnClickListener { openItem(item) }
+            if (item.type == "text") row.addView(TextView(this).apply {
+                text = item.content.take(300); setTextColor(MUTED); setPadding(0, dp(4), 0, 0)
+            })
             row.setOnLongClickListener {
                 AlertDialog.Builder(this@MainActivity)
                     .setMessage("حذف ${item.name}؟")
-                    .setPositiveButton("حذف") { _, _ ->
-                        v.items.removeAt(idx); Store.save(); render()
-                    }
+                    .setPositiveButton("حذف") { _, _ -> v.items.removeAt(idx); Store.save(); render() }
                     .setNegativeButton("إلغاء", null).show()
                 true
             }
             c.addView(row)
         }
-        if (!v.received) {
-            c.addView(label("إضافة عناصر:", MUTED, 12f))
-            c.addView(btn("➕ إضافة صورة من الجهاز") { pickFromDevice(REQ_PICK_IMAGE, "image/*", v.id) })
-            c.addView(btnSecondary("➕ إضافة ملف من الجهاز") { pickFromDevice(REQ_PICK_FILE, "*/*", v.id) })
-            c.addView(btnSecondary("➕ إضافة تطبيق مثبت") { showAppPicker(v) })
-            c.addView(btn("إضافة نص") { addTextToVault(v) })
-            c.addView(label("ملاحظة: الصور والملفات تُشارك كمرجع محلي (URI) صالح على نفس الجهاز فقط.", MUTED, 11f))
-            c.addView(btn("توليد باركود الخزنة") {
-                val payload = packVault(v)
-                if (payload == null) { toast("الخزنة كبيرة جداً للباركود"); return@btn }
-                currentVaultId = v.id
-                screen = "vault_qr"
-                render()
-                showQrDialog(payload, "شارك هذا الباركود — سيستلمه الشخص كخزنة")
-            })
-        }
+        c.addView(label("إضافة عناصر:", MUTED, 12f))
+        c.addView(btn("➕ صورة من الجهاز") { pickFromDevice(REQ_PICK_IMAGE, "image/*", v.id) })
+        c.addView(btnSecondary("➕ ملف من الجهاز") { pickFromDevice(REQ_PICK_FILE, "*/*", v.id) })
+        c.addView(btnSecondary("➕ تطبيق مثبت") { showAppPicker(v) })
+        c.addView(btn("إضافة نص") { addTextToVault(v) })
+        c.addView(btn("توليد باركود الخزنة") {
+            screen = "vault_qr"; render()
+        })
     }
 
     private fun buildVaultQr(c: LinearLayout) {
         val v = Store.findVault(currentVaultId ?: return) ?: return
         c.addView(btnSecondary("← رجوع") { screen = "vault_view"; render() })
-        val payload = packVault(v)
-        if (payload == null) {
-            c.addView(label("الخزنة كبيرة جداً للباركود — قلل العناصر", DANGER))
-            return
+        val base = serverBase()
+        if (base == null) {
+            c.addView(label("⚠ لا شبكة WiFi أو الخادم لم يبدأ.", DANGER)); return
         }
-        c.addView(label("باركود خزنة: ${v.name}", ACCENT))
-        val bmp = QrEncoder.renderBitmap(payload, 900)
-        if (bmp == null) {
-            c.addView(label("البيانات طويلة جداً", DANGER))
-            return
-        }
-        val iv = ImageView(this).apply {
+        if (v.items.isEmpty()) { c.addView(label("أضف عناصر أولاً.", DANGER)); return }
+        val url = "$base/v/${v.id}"
+        c.addView(label("امسح الباركود — ستظهر الصور والملفات مباشرة:", ACCENT))
+        val bmp = QrEncoder.renderBitmap(url, 900)
+        if (bmp == null) { c.addView(label("البيانات طويلة جداً", DANGER)); return }
+        c.addView(ImageView(this).apply {
             setImageBitmap(bmp); adjustViewBounds = true
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
             ).also { it.topMargin = dp(8) }
-        }
-        c.addView(iv)
-        c.addView(btnSecondary("نسخ نص الباركود") { copy(payload) })
+        })
+        c.addView(label(url, MUTED, 10f))
+        c.addView(label("⚠ يجب أن يكون الماسح على نفس شبكة WiFi.", MUTED, 11f))
     }
 
     private fun pickFromDevice(req: Int, mime: String, vaultId: String) {
         pendingVaultIdForPick = vaultId
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE)
-            type = mime
+            addCategory(Intent.CATEGORY_OPENABLE); type = mime
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
         }
         try { startActivityForResult(intent, req) }
@@ -947,47 +1109,14 @@ class MainActivity : Activity() {
             .sortedBy { pm.getApplicationLabel(it).toString() }
         if (apps.isEmpty()) { toast("لا توجد تطبيقات"); return }
         val names = apps.map { pm.getApplicationLabel(it).toString() }.toTypedArray()
-        AlertDialog.Builder(this)
-            .setTitle("اختر تطبيقاً")
+        AlertDialog.Builder(this).setTitle("اختر تطبيقاً")
             .setItems(names) { _, idx ->
                 val info = apps[idx]
                 val label = pm.getApplicationLabel(info).toString()
                 v.items.add(VaultItem("app", label, info.packageName))
-                Store.save()
-                currentVaultId = v.id
-                screen = "vault_view"
-                render()
+                Store.save(); currentVaultId = v.id; screen = "vault_view"; render()
             }
             .setNegativeButton("إلغاء", null).show()
-    }
-
-    private fun openItem(item: VaultItem) {
-        when (item.type) {
-            "image", "file" -> {
-                try {
-                    val uri = Uri.parse(item.content)
-                    val intent = Intent(Intent.ACTION_VIEW).apply {
-                        setDataAndType(uri, contentResolver.getType(uri) ?: "*/*")
-                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    }
-                    startActivity(intent)
-                } catch (e: Exception) {
-                    toast("لا يمكن فتح العنصر (قد يكون من جهاز آخر)")
-                }
-            }
-            "app" -> {
-                val intent = packageManager.getLaunchIntentForPackage(item.content)
-                if (intent != null) try { startActivity(intent) }
-                catch (e: Exception) { toast("غير متاح على هذا الجهاز") }
-                else toast("التطبيق غير مثبت")
-            }
-            "text" -> {
-                AlertDialog.Builder(this)
-                    .setTitle(item.name)
-                    .setMessage(item.content)
-                    .setPositiveButton("إغلاق", null).show()
-            }
-        }
     }
 
     private fun loadThumbnail(uri: Uri, maxPx: Int): Bitmap? {
@@ -995,10 +1124,9 @@ class MainActivity : Activity() {
             val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
             val longest = maxOf(opts.outWidth, opts.outHeight).coerceAtLeast(1)
-            var sample = 1
-            while (longest / sample > maxPx) sample *= 2
-            val opts2 = BitmapFactory.Options().apply { inSampleSize = sample }
-            contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts2) }
+            var s = 1; while (longest / s > maxPx) s *= 2
+            val o2 = BitmapFactory.Options().apply { inSampleSize = s }
+            contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, o2) }
         } catch (e: Exception) { null }
     }
 
@@ -1007,16 +1135,13 @@ class MainActivity : Activity() {
             hint = "اسم الخزنة"; setTextColor(FG); setHintTextColor(MUTED)
             setBackgroundColor(CARD); setPadding(dp(10), dp(8), dp(10), dp(8))
         }
-        AlertDialog.Builder(this)
-            .setTitle("خزنة جديدة")
-            .setView(et)
+        AlertDialog.Builder(this).setTitle("خزنة جديدة").setView(et)
             .setPositiveButton("إنشاء") { _, _ ->
                 val nm = et.text.toString().trim().ifEmpty { "خزنة" }
                 val v = Vault(Store.newId(), nm)
                 Store.vaults.add(v); Store.save()
                 currentVaultId = v.id; screen = "vault_view"; render()
-            }
-            .setNegativeButton("إلغاء", null).show()
+            }.setNegativeButton("إلغاء", null).show()
     }
 
     private fun addTextToVault(v: Vault) {
@@ -1035,88 +1160,12 @@ class MainActivity : Activity() {
             setPadding(dp(20), dp(10), dp(20), dp(10))
             addView(nameEt); addView(contentEt)
         }
-        AlertDialog.Builder(this)
-            .setTitle("نص جديد")
-            .setView(layout)
+        AlertDialog.Builder(this).setTitle("نص جديد").setView(layout)
             .setPositiveButton("إضافة") { _, _ ->
                 val n = nameEt.text.toString().trim().ifEmpty { "نص" }
-                val c = contentEt.text.toString()
-                v.items.add(VaultItem("text", n, c))
+                v.items.add(VaultItem("text", n, contentEt.text.toString()))
                 Store.save(); render()
-            }
-            .setNegativeButton("إلغاء", null).show()
-    }
-
-    private fun packVault(v: Vault): String? {
-        val arr = JSONArray()
-        for (item in v.items) {
-            arr.put(JSONObject().put("t", item.type).put("n", item.name).put("c", item.content))
-        }
-        val json = arr.toString()
-        val b64 = Base64.encodeToString(json.toByteArray(Charsets.UTF_8), Base64.URL_SAFE or Base64.NO_WRAP)
-        val uri = "vaultv1://pack/${v.id}?n=${Uri.encode(v.name)}&d=$b64"
-        if (uri.toByteArray(Charsets.UTF_8).size > 170) {
-            return null
-        }
-        return uri
-    }
-
-    private fun showQrDialog(payload: String, hint: String) {
-        val bmp = QrEncoder.renderBitmap(payload, 900)
-        if (bmp == null) { toast("البيانات طويلة جداً للباركود"); return }
-        val iv = ImageView(this).apply {
-            setImageBitmap(bmp); adjustViewBounds = true
-        }
-        val tv = TextView(this).apply {
-            text = hint; setTextColor(FG); setPadding(dp(8), dp(8), dp(8), dp(8))
-            gravity = Gravity.CENTER
-        }
-        val box = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(16), dp(16), dp(16))
-            addView(tv); addView(iv)
-        }
-        AlertDialog.Builder(this)
-            .setView(box)
-            .setPositiveButton("نسخ النص") { _, _ -> copy(payload) }
-            .setNegativeButton("إغلاق", null).show()
-    }
-
-    private fun showPasteDialog(scheme: String) {
-        val et = EditText(this).apply {
-            hint = "$scheme://..."
-            setTextColor(FG); setHintTextColor(MUTED); setBackgroundColor(CARD)
-            setPadding(dp(10), dp(8), dp(10), dp(8))
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
-            minLines = 3
-        }
-        val box = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(16), dp(16), dp(16))
-            addView(label("الصق نص الباركود المستلم:", FG))
-            addView(et)
-        }
-        AlertDialog.Builder(this)
-            .setTitle("باركود وارد")
-            .setView(box)
-            .setPositiveButton("معالجة") { _, _ ->
-                val txt = et.text.toString().trim()
-                if (txt.isEmpty()) return@setPositiveButton
-                val uri = Uri.parse(txt)
-                when (uri.scheme) {
-                    "msgv1" -> handleMsgUri(uri)
-                    "vaultv1" -> handleVaultUri(uri)
-                    else -> toast("مخطط URI غير معروف")
-                }
-                render()
-            }
-            .setNegativeButton("إلغاء", null).show()
-    }
-
-    private fun copy(text: String) {
-        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-        cm.setPrimaryClip(android.content.ClipData.newPlainText("qr", text))
-        toast("تم النسخ")
+            }.setNegativeButton("إلغاء", null).show()
     }
 
     private fun toast(msg: String) {
