@@ -51,9 +51,7 @@ import java.util.UUID
 object QrEncoder {
     private val ECC_M = intArrayOf(10, 16, 26, 18, 24, 16, 18, 22, 22)
     private val BLOCKS_M = intArrayOf(1, 1, 1, 2, 2, 4, 4, 4, 5)
-    private val FORMAT_M = intArrayOf(
-        0x5412, 0x5125, 0x5E7C, 0x5B4B, 0x45F9, 0x40CE, 0x4F97, 0x4AA0
-    )
+    private val FORMAT_M = intArrayOf(0x5412, 0x5125, 0x5E7C, 0x5B4B, 0x45F9, 0x40CE, 0x4F97, 0x4AA0)
     private val VERSION_INFO = intArrayOf(0, 0, 0, 0, 0, 0, 0x07C94, 0x085BC, 0x09A99)
 
     private val GF_EXP = IntArray(512)
@@ -242,10 +240,7 @@ object QrEncoder {
     private fun applyMask(m: Array<BooleanArray>, res: Array<BooleanArray>, mask: Int) {
         for (r in m.indices) for (c in m.indices) {
             if (res[r][c]) continue
-            val inv = when (mask) {
-                0 -> (r + c) % 2 == 0
-                else -> false
-            }
+            val inv = when (mask) { 0 -> (r + c) % 2 == 0; else -> false }
             if (inv) m[r][c] = !m[r][c]
         }
     }
@@ -295,18 +290,9 @@ object QrEncoder {
 // MODELS
 // ============================================================
 data class MsgItem(val from: String, val text: String, val ts: Long)
-
-data class Chan(
-    val id: String, val name: String,
-    val messages: MutableList<MsgItem> = mutableListOf()
-)
-
+data class Chan(val id: String, val name: String, val messages: MutableList<MsgItem> = mutableListOf())
 data class VaultItem(val type: String, val name: String, val content: String)
-
-data class Vault(
-    val id: String, val name: String,
-    val items: MutableList<VaultItem> = mutableListOf()
-)
+data class Vault(val id: String, val name: String, val items: MutableList<VaultItem> = mutableListOf())
 
 // ============================================================
 // STORE
@@ -376,7 +362,7 @@ object Store {
 }
 
 // ============================================================
-// LAN SERVER — plain HTTP/1.0 over raw socket, no deps
+// LAN SERVER — Premium Embedded UI
 // ============================================================
 object LanServer {
     private var serverSocket: ServerSocket? = null
@@ -531,7 +517,7 @@ object LanServer {
     }
 
     private fun send404(out: OutputStream) {
-        val b = "<!DOCTYPE html><html><body style='background:#000;color:#fff;text-align:center;padding:40px;font-family:sans-serif'><h1>404</h1><p>غير موجود</p></body></html>".toByteArray(Charsets.UTF_8)
+        val b = "<!DOCTYPE html><html><body style='background:#0a0a0d;color:#fff;text-align:center;padding:40px;font-family:sans-serif'><h1>404</h1><p>غير موجود</p></body></html>".toByteArray(Charsets.UTF_8)
         val h = "HTTP/1.0 404 Not Found\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: ${b.size}\r\nConnection: close\r\n\r\n"
         out.write(h.toByteArray(Charsets.UTF_8)); out.write(b); out.flush()
     }
@@ -555,74 +541,75 @@ object LanServer {
         } catch (e: Exception) { try { send404(out) } catch (x: Exception) { } }
     }
 
-    private fun esc(s: String): String = s
-        .replace("&", "&amp;").replace("<", "&lt;")
-        .replace(">", "&gt;").replace("\"", "&quot;")
+    private fun esc(s: String): String = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
 
+    // ------------------------------------------------------------
+    // PREMIUM MESSAGE UI
+    // ------------------------------------------------------------
     private fun composePage(chanId: String, name: String): String {
         val safe = esc(name)
         val initial = if (name.isNotEmpty()) name.substring(0, 1).uppercase() else "A"
         return """<!DOCTYPE html>
 <html dir="rtl" lang="ar"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>$safe</title>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0a0a0d">
+<title>$safe — إرسال رسالة</title>
 <style>
-*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-body{margin:0;background:#0f0f0f;color:#fff;font-family:Roboto,system-ui,sans-serif}
-.topbar{display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid #222;background:#0f0f0f;position:sticky;top:0;z-index:10}
-.logo{color:#f00;font-weight:700;font-size:18px}
-.spacer{flex:1}
-.chline{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid #222;background:#0f0f0f}
-.av{width:44px;height:44px;border-radius:50%;background:linear-gradient(135deg,#f00,#a00);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:20px;flex-shrink:0}
-.chname{font-weight:600;font-size:15px}
-.subs{font-size:12px;color:#aaa;margin-top:2px}
-.subbtn{background:#f00;color:#fff;border:none;padding:8px 16px;border-radius:18px;font-weight:600;font-size:13px;margin-right:auto}
-.video{position:relative;width:100%;padding-bottom:56.25%;background:#000}
-.video iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
-.meta{padding:12px 16px}
-.title{font-weight:600;font-size:15px;margin-bottom:4px;line-height:1.4}
-.metasmall{font-size:12px;color:#aaa}
-.divider{height:1px;background:#272727;margin:12px 0}
-.comments{padding:0 16px 32px}
-.form{display:flex;flex-direction:column;gap:14px}
-.row{display:flex;gap:10px;align-items:center}
-.row input{flex:1;background:transparent;border:none;border-bottom:1px solid #333;padding:10px 4px;color:#fff;font-size:15px;outline:none;font-family:inherit}
-.row input:focus{border-bottom-color:#fff}
-.row input::placeholder{color:#888}
-button{background:#f00;color:#fff;border:none;border-radius:22px;padding:11px 22px;font-weight:600;font-size:14px;cursor:pointer;font-family:inherit}
-button:active{background:#c00}
-.hint{color:#666;font-size:11px;text-align:center;padding:20px 12px}
+  :root { --accent: #a855f7; --bg: #0a0a0d; --panel: #16171b; --line: #2a2d34; --text: #e8e9ee; --muted: #8a8f9c; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; background: radial-gradient(circle at 50% 15%, #1c1c22 0%, var(--bg) 70%); color: var(--text); font-family: system-ui, -apple-system, sans-serif; padding-bottom: 40px; }
+  .topbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: rgba(15,15,15,0.8); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 10; }
+  .logo { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 16px; letter-spacing: -0.5px; }
+  .logo span { color: #ff0000; font-size: 20px; }
+  .chline { display: flex; align-items: center; gap: 14px; padding: 20px 16px; border-bottom: 1px solid var(--line); }
+  .av { width: 52px; height: 52px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), #7c3aed); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 24px; flex-shrink: 0; box-shadow: 0 4px 12px rgba(168,85,247,0.3); }
+  .chname { font-weight: 700; font-size: 17px; }
+  .subs { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .subbtn { background: var(--accent); color: #fff; border: none; padding: 8px 18px; border-radius: 20px; font-weight: 700; font-size: 13px; margin-right: auto; box-shadow: 0 4px 14px rgba(168,85,247,0.4); }
+  .video-placeholder { position: relative; width: 100%; padding-bottom: 56.25%; background: linear-gradient(45deg, #101114, #1a1b22); display: flex; align-items: center; justify-content: center; border-bottom: 1px solid var(--line); }
+  .play-icon { position: absolute; width: 60px; height: 60px; background: rgba(168,85,247,0.2); border: 2px solid var(--accent); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px; color: var(--accent); animation: pulse 2s infinite; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(168,85,247,0.5); } 70% { box-shadow: 0 0 0 20px rgba(168,85,247,0); } 100% { box-shadow: 0 0 0 0 rgba(168,85,247,0); } }
+  .meta { padding: 16px; }
+  .title { font-weight: 700; font-size: 16px; margin-bottom: 6px; line-height: 1.4; }
+  .metasmall { font-size: 12px; color: var(--muted); }
+  .divider { height: 1px; background: var(--line); margin: 0 16px; }
+  .comments { padding: 20px 16px; }
+  .form { display: flex; flex-direction: column; gap: 16px; }
+  .row { display: flex; gap: 12px; align-items: center; }
+  .row input { flex: 1; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; color: var(--text); font-size: 14px; outline: none; font-family: inherit; transition: 0.2s; }
+  .row input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(168,85,247,0.15); }
+  .row input::placeholder { color: var(--muted); }
+  button { background: linear-gradient(180deg, var(--accent), #7c3aed); color: #fff; border: none; border-radius: 12px; padding: 14px 24px; font-weight: 700; font-size: 15px; cursor: pointer; font-family: inherit; box-shadow: 0 4px 15px rgba(168,85,247,0.4); transition: 0.1s; }
+  button:active { transform: scale(0.97); }
+  .hint { color: var(--muted); font-size: 11px; text-align: center; padding: 30px 16px; line-height: 1.8; }
 </style></head><body>
-<div class="topbar"><span class="logo">▶ YouTube</span></div>
+<div class="topbar"><div class="logo"><span>▶</span> YouTube</div></div>
 <div class="chline">
   <div class="av">$initial</div>
-  <div><div class="chname">$safe</div><div class="subs">قناة QRX • مشترك</div></div>
+  <div><div class="chname">$safe</div><div class="subs">قناة QRX • تفاعل مباشر</div></div>
   <button class="subbtn" type="button">مشترك ✓</button>
 </div>
-<div class="video">
-  <iframe src="https://www.youtube.com/embed/aqz-KE-bpKQ?rel=0" allowfullscreen></iframe>
-</div>
+<div class="video-placeholder"><div class="play-icon">▶</div></div>
 <div class="meta">
-  <div class="title">اكتب رسالتك لقناة $safe</div>
-  <div class="metasmall">ستُسلَّم الرسالة إلى تطبيق QRX على جهاز صاحب القناة</div>
+  <div class="title">أرسل رسالة إلى $safe</div>
+  <div class="metasmall">ستُسلَّم فوراً إلى تطبيق QRX على جهاز صاحب القناة</div>
 </div>
 <div class="divider"></div>
 <div class="comments">
   <form class="form" method="POST" action="/s/$chanId">
     <div class="row">
-      <div class="av" style="width:36px;height:36px;font-size:16px">${"$"}{initial}</div>
-      <input type="text" name="f" placeholder="اسمك" required maxlength="40">
+      <input type="text" name="f" placeholder="اسمك (اختياري)" maxlength="40">
     </div>
     <div class="row">
-      <input type="text" name="m" placeholder="أضف تعليقاً عاماً..." required maxlength="400" autofocus>
+      <input type="text" name="m" placeholder="اكتب تعليقاً..." required maxlength="400" autofocus>
     </div>
     <div class="row" style="justify-content:flex-end">
       <button type="submit">إرسال</button>
     </div>
   </form>
 </div>
-<div class="hint">📶 يجب أن تكون على نفس شبكة WiFi — أبقِ تطبيق QRX مفتوحاً على جهاز المستقبل</div>
-</body></html>""".replace("\${initial}", initial)
+<div class="hint">📶 يجب أن تكون على نفس شبكة WiFi<br>أبقِ تطبيق QRX مفتوحاً على جهاز المستقبل</div>
+</body></html>"""
     }
 
     private fun thanksPage(from: String): String {
@@ -631,22 +618,26 @@ button:active{background:#c00}
 <html dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>تم الإرسال</title>
 <style>
-body{margin:0;background:#0f0f0f;color:#fff;font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px}
-.box{background:#181818;border-radius:16px;padding:32px 24px;max-width:400px;width:100%;text-align:center;border:1px solid #222}
-.ic{font-size:64px;margin-bottom:8px}
-h1{font-size:20px;margin:0 0 12px}
-p{color:#aaa;font-size:14px;line-height:1.6;margin:0}
-.sign{margin-top:16px;color:#666;font-size:12px}
+  body { margin: 0; background: radial-gradient(circle at 50% 15%, #1c1c22 0%, #0a0a0d 70%); color: #e8e9ee; font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 24px; }
+  .box { background: linear-gradient(155deg, #16171b, #101114); border: 1px solid rgba(168,85,247,0.3); border-radius: 20px; padding: 40px 24px; max-width: 400px; width: 100%; text-align: center; box-shadow: 0 20px 50px rgba(0,0,0,0.7), 0 0 40px rgba(168,85,247,0.1); animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+  @keyframes popIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  .ic { font-size: 64px; margin-bottom: 16px; text-shadow: 0 0 20px rgba(110,247,166,0.5); }
+  h1 { font-size: 22px; margin: 0 0 12px; color: #6ef7a6; }
+  p { color: #8a8f9c; font-size: 14px; line-height: 1.6; margin: 0; }
+  .sign { margin-top: 20px; color: #a855f7; font-size: 13px; font-weight: 700; }
 </style></head><body>
 <div class="box">
   <div class="ic">✅</div>
-  <h1>تم إرسال رسالتك</h1>
-  <p>وصلت إلى تطبيق QRX على جهاز صاحب القناة.</p>
+  <h1>تم الإرسال بنجاح</h1>
+  <p>وصلت رسالتك إلى تطبيق QRX على جهاز صاحب القناة.</p>
   <p class="sign">— $safe</p>
 </div>
 </body></html>"""
     }
 
+    // ------------------------------------------------------------
+    // PREMIUM VAULT UI
+    // ------------------------------------------------------------
     private fun vaultPage(v: Vault): String {
         val sb = StringBuilder()
         for ((idx, item) in v.items.withIndex()) {
@@ -677,30 +668,43 @@ p{color:#aaa;font-size:14px;line-height:1.6;margin:0}
         }
         val safe = esc(v.name)
         return """<!DOCTYPE html>
-<html dir="rtl" lang="ar"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<html dir="rtl" lang="ar"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0a0a0d">
 <title>خزنة $safe</title>
 <style>
-body{margin:0;background:#0f0f0f;color:#fff;font-family:system-ui,sans-serif;padding:16px 16px 40px}
-h1{font-size:19px;margin:0 0 4px}
-.count{color:#888;font-size:12px;margin-bottom:18px}
-.card{background:#181818;border:1px solid #262626;border-radius:12px;padding:14px;margin-bottom:12px;overflow:hidden}
-.card h3{margin:6px 0 8px;font-size:15px;font-weight:600;word-break:break-word}
-.tag{display:inline-block;font-size:11px;font-weight:700;padding:3px 8px;border-radius:10px;margin-bottom:2px}
-.t-img{background:#3a0a0a;color:#f77}
-.t-file{background:#0a1e3a;color:#7af}
-.t-app{background:#1f0a3a;color:#c7f}
-.t-text{background:#2a2a0a;color:#ee7}
-.body{color:#ccc;white-space:pre-wrap;word-break:break-word;font-size:14px;line-height:1.55}
-.card img{width:100%;border-radius:8px;display:block;margin-top:6px;background:#000}
-.card a{display:inline-block;color:#0af;text-decoration:none;font-weight:600;padding:8px 0;font-size:14px}
-code{background:#000;padding:2px 6px;border-radius:4px;font-size:12px;color:#7ff}
-.hint{color:#666;font-size:11px;text-align:center;padding:20px 8px;line-height:1.6}
+  :root { --accent: #a855f7; --bg: #0a0a0d; --panel: #101114; --panel-2: #16171b; --line: #2a2d34; --text: #e8e9ee; --muted: #8a8f9c; --ok: #6ef7a6; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; background: radial-gradient(circle at 50% 15%, #1c1c22 0%, var(--bg) 70%); color: var(--text); font-family: system-ui, sans-serif; padding: 20px 16px 60px; min-height: 100vh; }
+  .header { text-align: center; margin-bottom: 30px; animation: fadeInDown 0.6s ease; }
+  @keyframes fadeInDown { from { transform: translateY(-20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  .header h1 { font-size: 24px; margin: 0 0 8px; font-weight: 800; }
+  .header h1 span { color: var(--accent); }
+  .header .count { color: var(--muted); font-size: 13px; background: rgba(168,85,247,0.1); display: inline-block; padding: 4px 12px; border-radius: 20px; border: 1px solid rgba(168,85,247,0.2); }
+  .grid { display: flex; flex-direction: column; gap: 16px; max-width: 600px; margin: 0 auto; }
+  .card { background: linear-gradient(155deg, var(--panel-2), var(--panel)); border: 1px solid var(--line); border-radius: 16px; padding: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); overflow: hidden; animation: slideUp 0.4s ease both; }
+  .card:nth-child(1) { animation-delay: 0.1s; } .card:nth-child(2) { animation-delay: 0.15s; } .card:nth-child(3) { animation-delay: 0.2s; }
+  @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  .card h3 { margin: 8px 0 10px; font-size: 16px; font-weight: 700; word-break: break-word; }
+  .tag { display: inline-block; font-size: 11px; font-weight: 800; padding: 4px 10px; border-radius: 8px; letter-spacing: 0.5px; }
+  .t-img { background: rgba(255, 85, 85, 0.15); color: #ff7a7a; border: 1px solid rgba(255, 85, 85, 0.3); }
+  .t-file { background: rgba(85, 170, 255, 0.15); color: #7af; border: 1px solid rgba(85, 170, 255, 0.3); }
+  .t-app { background: rgba(170, 85, 255, 0.15); color: #c7f; border: 1px solid rgba(170, 85, 255, 0.3); }
+  .t-text { background: rgba(255, 255, 85, 0.15); color: #ee7; border: 1px solid rgba(255, 255, 85, 0.3); }
+  .body { color: #c7cad2; white-space: pre-wrap; word-break: break-word; font-size: 14px; line-height: 1.6; }
+  .card img { width: 100%; border-radius: 12px; display: block; margin-top: 10px; background: #000; box-shadow: 0 4px 15px rgba(0,0,0,0.4); }
+  .card a { display: inline-block; color: var(--accent); text-decoration: none; font-weight: 700; padding: 10px 16px; background: rgba(168,85,247,0.1); border: 1px solid rgba(168,85,247,0.3); border-radius: 10px; font-size: 14px; margin-top: 6px; transition: 0.2s; }
+  .card a:hover { background: rgba(168,85,247,0.2); }
+  code { background: #000; padding: 3px 8px; border-radius: 6px; font-size: 12px; color: #7ff; font-family: monospace; }
+  .footer { color: #555; font-size: 11px; text-align: center; padding: 30px 16px; line-height: 1.8; }
 </style></head><body>
-<h1>🗄 $safe</h1>
-<div class="count">${v.items.size} عنصر</div>
+<div class="header">
+  <h1>🔒 خزنة <span>$safe</span></h1>
+  <div class="count">${v.items.size} عنصر</div>
+</div>
+<div class="grid">
 $sb
-<div class="hint">📶 يجب أن تكون على نفس شبكة WiFi — المحتوى يُبث مباشرة من جهاز صاحب الخزنة</div>
+</div>
+<div class="footer">📶 المحتوى يُبث مباشرة من جهاز صاحب الخزنة<br>يجب أن تكون على نفس شبكة WiFi</div>
 </body></html>"""
     }
 }
@@ -899,7 +903,6 @@ class MainActivity : Activity() {
         c.addView(btn("فتح قسم الرسائل") { screen = "messages"; render() })
         c.addView(label("القسم الثاني — خزنة QR", ACCENT, 16f))
         c.addView(btn("فتح قسم الخزنة") { screen = "vaults"; render() })
-        c.addView(label("آخر رسالة جديدة ستظهر في القسم الأول.", MUTED, 11f))
     }
 
     private fun buildMessages(c: LinearLayout) {
